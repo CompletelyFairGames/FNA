@@ -8,7 +8,7 @@
 #endregion
 
 #region THREADED_GL Option
-// #define THREADED_GL
+#define THREADED_GL
 /* Ah, so I see you've run into some issues with threaded GL...
  *
  * This class is designed to handle rendering coming from multiple threads, but
@@ -24,7 +24,8 @@
 #endregion
 
 #region DISABLE_THREADING Option
-// #define DISABLE_THREADING
+ //#define DISABLE_THREADING
+//#define CRASH_ON_THREADING
 /* Perhaps you read the above option and thought to yourself:
  * "Wow, only an idiot would need threads for their graphics code!"
  *
@@ -4580,11 +4581,17 @@ namespace Microsoft.Xna.Framework.Graphics
 		private void ForceToMainThread(Action action)
 		{
 			// If we're already on the main thread, just call the action.
-			if (mainThreadId == Thread.CurrentThread.ManagedThreadId)
-			{
-				action();
-				return;
-			}
+		    if (mainThreadId == Thread.CurrentThread.ManagedThreadId)
+		    {
+		        action();
+		        return;
+		    }
+#if CRASH_ON_THREADING
+		    else
+		    {
+		        throw new InvalidOperationException("OpenGL used outside of the main thread.");
+		    }
+#endif
 
 #if THREADED_GL
 			lock (BackgroundContext)
