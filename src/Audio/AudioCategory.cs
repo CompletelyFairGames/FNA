@@ -1,6 +1,6 @@
 #region License
 /* FNA - XNA4 Reimplementation for Desktop Platforms
- * Copyright 2009-2016 Ethan Lee and the MonoGame Team
+ * Copyright 2009-2017 Ethan Lee and the MonoGame Team
  *
  * Released under the Microsoft Public License.
  * See LICENSE for details.
@@ -58,6 +58,7 @@ namespace Microsoft.Xna.Framework.Audio
 		#region Private Variables
 
 		private readonly List<Cue> activeCues;
+		private readonly List<Cue> dyingCues;
 
 		private readonly Dictionary<string, List<Cue>> cueInstanceCounts;
 
@@ -83,6 +84,7 @@ namespace Microsoft.Xna.Framework.Audio
 			INTERNAL_name = name;
 			INTERNAL_volume = new PrimitiveInstance<float>(volume);
 			activeCues = new List<Cue>();
+			dyingCues = new List<Cue>();
 			cueInstanceCounts = new Dictionary<string, List<Cue>>();
 
 			baseVolume = volume;
@@ -106,6 +108,10 @@ namespace Microsoft.Xna.Framework.Audio
 				{
 					curCue.Pause();
 				}
+				foreach (AudioCategory ac in subCategories)
+				{
+					ac.Pause();
+				}
 			}
 		}
 
@@ -116,6 +122,10 @@ namespace Microsoft.Xna.Framework.Audio
 				foreach (Cue curCue in activeCues)
 				{
 					curCue.Resume();
+				}
+				foreach (AudioCategory ac in subCategories)
+				{
+					ac.Resume();
 				}
 			}
 		}
@@ -142,9 +152,25 @@ namespace Microsoft.Xna.Framework.Audio
 					curCue.Stop(options);
 				}
 				activeCues.Clear();
+				if (options == AudioStopOptions.Immediate)
+				{
+					lock (dyingCues)
+					{
+						while (dyingCues.Count > 0)
+						{
+							Cue curCue = dyingCues[0];
+							curCue.Stop(AudioStopOptions.Immediate);
+						}
+						dyingCues.Clear();
+					}
+				}
 				foreach (List<Cue> count in cueInstanceCounts.Values)
 				{
 					count.Clear();
+				}
+				foreach (AudioCategory ac in subCategories)
+				{
+					ac.Stop(options);
 				}
 			}
 		}
@@ -202,6 +228,16 @@ namespace Microsoft.Xna.Framework.Audio
 					}
 				}
 			}
+			lock (dyingCues)
+			{
+				for (int i = 0; i < dyingCues.Count; i += 1)
+				{
+					if (!dyingCues[i].INTERNAL_update())
+					{
+						i -= 1;
+					}
+				}
+			}
 		}
 
 		internal bool INTERNAL_addCue(Cue newCue)
@@ -216,14 +252,28 @@ namespace Microsoft.Xna.Framework.Audio
 					}
 					else if (maxCueBehavior == MaxInstanceBehavior.Queue)
 					{
-						newCue.INTERNAL_startFadeIn(maxFadeInMS);
-						activeCues[0].INTERNAL_startFadeOut(maxFadeOutMS);
+						if (maxFadeInMS > 0)
+						{
+							newCue.INTERNAL_startFadeIn(maxFadeInMS);
+						}
+						if (maxFadeOutMS > 0)
+						{
+							activeCues[0].INTERNAL_startFadeOut(maxFadeOutMS);
+						}
+						else
+						{
+							activeCues[0].Stop(AudioStopOptions.AsAuthored);
+						}
 					}
 					else if (maxCueBehavior == MaxInstanceBehavior.ReplaceOldest)
 					{
 						if (!INTERNAL_removeOldestCue(activeCues[0].Name))
 						{
 							return false; // Just ignore us...
+						}
+						if (maxFadeInMS > 0)
+						{
+							newCue.INTERNAL_startFadeIn(maxFadeInMS);
 						}
 					}
 					else if (maxCueBehavior == MaxInstanceBehavior.ReplaceQuietest)
@@ -250,6 +300,10 @@ namespace Microsoft.Xna.Framework.Audio
 						{
 							return false; // Just ignore us...
 						}
+						if (maxFadeInMS > 0)
+						{
+							newCue.INTERNAL_startFadeIn(maxFadeInMS);
+						}
 					}
 					else if (maxCueBehavior == MaxInstanceBehavior.ReplaceLowestPriority)
 					{
@@ -258,8 +312,13 @@ namespace Microsoft.Xna.Framework.Audio
 						{
 							return false; // Just ignore us...
 						}
+						if (maxFadeInMS > 0)
+						{
+							newCue.INTERNAL_startFadeIn(maxFadeInMS);
+						}
 					}
 				}
+
 				cueInstanceCounts[newCue.Name].Add(newCue);
 				activeCues.Add(newCue);
 			}
@@ -274,7 +333,14 @@ namespace Microsoft.Xna.Framework.Audio
 				{
 					if (activeCues[i].Name.Equals(name) && !activeCues[i].JustStarted)
 					{
-						activeCues[i].Stop(AudioStopOptions.AsAuthored);
+						if (maxFadeOutMS > 0)
+						{
+							activeCues[i].INTERNAL_startFadeOut(maxFadeOutMS);
+						}
+						else
+						{
+							activeCues[i].Stop(AudioStopOptions.AsAuthored);
+						}
 						return true;
 					}
 				}
@@ -304,7 +370,14 @@ namespace Microsoft.Xna.Framework.Audio
 
 				if (lowestIndex > -1)
 				{
-					activeCues[lowestIndex].Stop(AudioStopOptions.AsAuthored);
+					if (maxFadeOutMS > 0)
+					{
+						activeCues[lowestIndex].INTERNAL_startFadeOut(maxFadeOutMS);
+					}
+					else
+					{
+						activeCues[lowestIndex].Stop(AudioStopOptions.AsAuthored);
+					}
 					return true;
 				}
 				return false;
@@ -323,6 +396,16 @@ namespace Microsoft.Xna.Framework.Audio
 						activeCues.Remove(cue);
 						cueInstanceCounts[cue.Name].Remove(cue);
 					}
+					else if (dyingCues != null)
+					{
+						lock (dyingCues)
+						{
+							if (dyingCues.Contains(cue))
+							{
+								dyingCues.Remove(cue);
+							}
+						}
+					}
 				}
 			}
 		}
@@ -334,6 +417,15 @@ namespace Microsoft.Xna.Framework.Audio
 				cueInstanceCounts.Add(name, new List<Cue>());
 			}
 			return cueInstanceCounts[name].Count;
+		}
+
+		internal void INTERNAL_moveToDying(Cue cue)
+		{
+			INTERNAL_removeActiveCue(cue);
+			lock (dyingCues)
+			{
+				dyingCues.Add(cue);
+			}
 		}
 
 		#endregion
