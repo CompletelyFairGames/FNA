@@ -1,6 +1,6 @@
 #region License
 /* FNA - XNA4 Reimplementation for Desktop Platforms
- * Copyright 2009-2016 Ethan Lee and the MonoGame Team
+ * Copyright 2009-2017 Ethan Lee and the MonoGame Team
  *
  * Released under the Microsoft Public License.
  * See LICENSE for details.
@@ -534,7 +534,7 @@ namespace Microsoft.Xna.Framework.Audio
 				AL10.alSourcef(
 					result,
 					AL10.AL_MAX_GAIN,
-					64.0f // FIXME: Arbitrary, but try to keep this sane! -flibit
+					AudioDevice.MAX_GAIN_VALUE
 				);
 			}
 #if VERBOSE_AL_DEBUGGING
@@ -1047,7 +1047,7 @@ namespace Microsoft.Xna.Framework.Audio
 			EFX.alEffectf(
 				(reverb as OpenALReverb).EffectHandle,
 				EFX.AL_EAXREVERB_GAINHF,
-				XACTCalculator.CalculateAmplitudeRatio(
+				XACTCalculator.CalculateReverbAmplitudeRatio(
 					value - 8.0f
 				)
 			);
@@ -1095,7 +1095,7 @@ namespace Microsoft.Xna.Framework.Audio
 				(reverb as OpenALReverb).EffectHandle,
 				EFX.AL_EAXREVERB_REFLECTIONS_GAIN,
 				Math.Min(
-					XACTCalculator.CalculateAmplitudeRatio(value),
+					XACTCalculator.CalculateReverbAmplitudeRatio(value),
 					3.16f
 				)
 			);
@@ -1111,7 +1111,7 @@ namespace Microsoft.Xna.Framework.Audio
 				(reverb as OpenALReverb).EffectHandle,
 				EFX.AL_EAXREVERB_GAIN,
 				Math.Min(
-					XACTCalculator.CalculateAmplitudeRatio(value),
+					XACTCalculator.CalculateReverbAmplitudeRatio(value),
 					1.0f
 				)
 			);

@@ -1,6 +1,6 @@
 #region License
 /* FNA - XNA4 Reimplementation for Desktop Platforms
- * Copyright 2009-2016 Ethan Lee and the MonoGame Team
+ * Copyright 2009-2017 Ethan Lee and the MonoGame Team
  *
  * Released under the Microsoft Public License.
  * See LICENSE for details.
@@ -424,13 +424,15 @@ namespace Microsoft.Xna.Framework.Graphics
 
 		#endregion
 
-		#region Faux-Backbuffer Variable
+		#region Faux-Backbuffer Variables
 
 		public IGLBackbuffer Backbuffer
 		{
 			get;
 			private set;
 		}
+
+		private GLenum backbufferScaleMode;
 
 		#endregion
 
@@ -582,6 +584,11 @@ namespace Microsoft.Xna.Framework.Graphics
 				IntPtr.Zero
 			);
 			MojoShader.MOJOSHADER_glMakeContextCurrent(shaderContext);
+
+			// Some users might want pixely upscaling...
+			backbufferScaleMode = Environment.GetEnvironmentVariable(
+				"FNA_OPENGL_BACKBUFFER_SCALE_NEAREST"
+			) == "1" ? GLenum.GL_NEAREST : GLenum.GL_LINEAR;
 
 			// Print GL information
 			FNALoggerEXT.LogInfo("IGLDevice: ModernGLDevice");
@@ -915,7 +922,7 @@ namespace Microsoft.Xna.Framework.Graphics
 					srcX, srcY, srcW, srcH,
 					dstX, dstY, dstW, dstH,
 					GLenum.GL_COLOR_BUFFER_BIT,
-					GLenum.GL_LINEAR
+					backbufferScaleMode
 				);
 
 				if (scissorTestEnable)
@@ -1203,7 +1210,7 @@ namespace Microsoft.Xna.Framework.Graphics
 			// Flip rectangle when target is not bound
 			if (!renderTargetBound)
 			{
-				scissorRect.Y = viewport.Height - scissorRect.Y - scissorRect.Height;
+				scissorRect.Y = Backbuffer.Height - scissorRect.Y - scissorRect.Height;
 			}
 
 			if (scissorRect != scissorRectangle)

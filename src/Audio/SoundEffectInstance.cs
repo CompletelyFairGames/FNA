@@ -1,6 +1,6 @@
 #region License
 /* FNA - XNA4 Reimplementation for Desktop Platforms
- * Copyright 2009-2016 Ethan Lee and the MonoGame Team
+ * Copyright 2009-2017 Ethan Lee and the MonoGame Team
  *
  * Released under the Microsoft Public License.
  * See LICENSE for details.
@@ -73,6 +73,14 @@ namespace Microsoft.Xna.Framework.Audio
 			}
 			set
 			{
+				if (INTERNAL_isXACTSource)
+				{
+					value = MathHelper.Clamp(value, -2.0f, 2.0f);
+				}
+				else
+				{
+					value = MathHelper.Clamp(value, -1.0f, 1.0f);
+				}
 				INTERNAL_pitch = value;
 				if (INTERNAL_alSource != null)
 				{
@@ -230,13 +238,8 @@ namespace Microsoft.Xna.Framework.Audio
 				INTERNAL_positionalAudio = true;
 			}
 
-			if (INTERNAL_alSource == null)
-			{
-				return;
-			}
-
 			// Set up our final position according to orientation of listener
-			Vector3 position = Vector3.Transform(
+			position = Vector3.Transform(
 				emitter.Position - listener.Position,
 				Matrix.CreateWorld(Vector3.Zero, listener.Forward, listener.Up)
 			);
@@ -247,11 +250,15 @@ namespace Microsoft.Xna.Framework.Audio
 				position.Normalize();
 			}
 
-			// Finally.
-			AudioDevice.ALDevice.SetSourcePosition(
-				INTERNAL_alSource,
-				position
-			);
+			// This can get called before Play()...
+			if (INTERNAL_alSource != null)
+			{
+				// Finally.
+				AudioDevice.ALDevice.SetSourcePosition(
+					INTERNAL_alSource,
+					position
+				);
+			}
 		}
 
 		public void Apply3D(AudioListener[] listeners, AudioEmitter emitter)

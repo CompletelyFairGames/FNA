@@ -1,6 +1,6 @@
 #region License
 /* FNA - XNA4 Reimplementation for Desktop Platforms
- * Copyright 2009-2016 Ethan Lee and the MonoGame Team
+ * Copyright 2009-2017 Ethan Lee and the MonoGame Team
  *
  * Released under the Microsoft Public License.
  * See LICENSE for details.
@@ -114,8 +114,8 @@ namespace Microsoft.Xna.Framework
 		public static GameWindow CreateWindow()
 		{
 			// GLContext environment variables
-			bool forceES2 = Environment.GetEnvironmentVariable(
-				"FNA_OPENGL_FORCE_ES2"
+			bool forceES3 = Environment.GetEnvironmentVariable(
+				"FNA_OPENGL_FORCE_ES3"
 			) == "1";
 			bool forceCoreProfile = Environment.GetEnvironmentVariable(
 				"FNA_OPENGL_FORCE_CORE_PROFILE"
@@ -141,7 +141,7 @@ namespace Microsoft.Xna.Framework
 			SDL.SDL_GL_SetAttribute(SDL.SDL_GLattr.SDL_GL_DEPTH_SIZE, 24);
 			SDL.SDL_GL_SetAttribute(SDL.SDL_GLattr.SDL_GL_STENCIL_SIZE, 8);
 			SDL.SDL_GL_SetAttribute(SDL.SDL_GLattr.SDL_GL_DOUBLEBUFFER, 1);
-			if (forceES2)
+			if (forceES3)
 			{
 				SDL.SDL_GL_SetAttribute(
 					SDL.SDL_GLattr.SDL_GL_RETAINED_BACKING,
@@ -153,7 +153,7 @@ namespace Microsoft.Xna.Framework
 				);
 				SDL.SDL_GL_SetAttribute(
 					SDL.SDL_GLattr.SDL_GL_CONTEXT_MAJOR_VERSION,
-					2
+					3
 				);
 				SDL.SDL_GL_SetAttribute(
 					SDL.SDL_GLattr.SDL_GL_CONTEXT_MINOR_VERSION,
@@ -216,9 +216,9 @@ namespace Microsoft.Xna.Framework
 
 			return new FNAWindow(
 				window,
-				SDL.SDL_GetDisplayName(
-					SDL.SDL_GetWindowDisplayIndex(window)
-				)
+				@"\\.\DISPLAY" + (
+					SDL.SDL_GetWindowDisplayIndex(window) + 1
+				).ToString()
 			);
 		}
 
@@ -307,8 +307,7 @@ namespace Microsoft.Xna.Framework
 			int displayIndex = 0;
 			for (int i = 0; i < GraphicsAdapter.Adapters.Count; i += 1)
 			{
-				// FIXME: Should be checking Name, not Description! -flibit
-				if (screenDeviceName == GraphicsAdapter.Adapters[i].Description)
+				if (screenDeviceName == GraphicsAdapter.Adapters[i].DeviceName)
 				{
 					displayIndex = i;
 					break;
@@ -509,6 +508,7 @@ namespace Microsoft.Xna.Framework
 		public static void RunLoop(Game game)
 		{
 			SDL.SDL_ShowWindow(game.Window.Handle);
+			game.IsActive = true;
 
 			Rectangle windowBounds = game.Window.ClientBounds;
 			Mouse.INTERNAL_WindowWidth = windowBounds.Width;
@@ -627,10 +627,6 @@ namespace Microsoft.Xna.Framework
 					}
 
 					// Mouse Input
-					else if (evt.type == SDL.SDL_EventType.SDL_MOUSEMOTION)
-					{
-						Mouse.INTERNAL_IsWarped = false;
-					}
 					else if (evt.type == SDL.SDL_EventType.SDL_MOUSEWHEEL)
 					{
 						// 120 units per notch. Because reasons.
@@ -904,6 +900,7 @@ namespace Microsoft.Xna.Framework
 						SurfaceFormat.Color // FIXME: Assumption!
 					),
 					new DisplayModeCollection(modes),
+					@"\\.\DISPLAY" + (i + 1).ToString(),
 					SDL.SDL_GetDisplayName(i)
 				);
 			}
@@ -924,11 +921,19 @@ namespace Microsoft.Xna.Framework
 			out ButtonState x1,
 			out ButtonState x2
 		) {
-			uint flags = SDL.SDL_GetGlobalMouseState(out x, out y);
-			int wx = 0, wy = 0;
-			SDL.SDL_GetWindowPosition(window, out wx, out wy);
-			x -= wx;
-			y -= wy;
+			uint flags;
+			if (GetRelativeMouseMode())
+			{
+				flags = SDL.SDL_GetRelativeMouseState(out x, out y);
+			}
+			else
+			{
+				flags = SDL.SDL_GetGlobalMouseState(out x, out y);
+				int wx = 0, wy = 0;
+				SDL.SDL_GetWindowPosition(window, out wx, out wy);
+				x -= wx;
+				y -= wy;
+			}
 			left =		(ButtonState) (flags & SDL.SDL_BUTTON_LMASK);
 			middle =	(ButtonState) ((flags & SDL.SDL_BUTTON_MMASK) >> 1);
 			right =		(ButtonState) ((flags & SDL.SDL_BUTTON_RMASK) >> 2);
@@ -939,6 +944,20 @@ namespace Microsoft.Xna.Framework
 		public static void OnIsMouseVisibleChanged(bool visible)
 		{
 			SDL.SDL_ShowCursor(visible ? 1 : 0);
+		}
+
+		public static bool GetRelativeMouseMode()
+		{
+			return SDL.SDL_GetRelativeMouseMode() == SDL.SDL_bool.SDL_TRUE;
+		}
+
+		public static void SetRelativeMouseMode(bool enable)
+		{
+			SDL.SDL_SetRelativeMouseMode(
+				enable ?
+					SDL.SDL_bool.SDL_TRUE :
+					SDL.SDL_bool.SDL_FALSE
+			);
 		}
 
 		#endregion
