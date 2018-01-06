@@ -24,7 +24,7 @@
 #endregion
 
 #region DISABLE_THREADING Option
- //#define DISABLE_THREADING
+//#define DISABLE_THREADING
 //#define CRASH_ON_THREADING
 /* Perhaps you read the above option and thought to yourself:
  * "Wow, only an idiot would need threads for their graphics code!"
@@ -1764,7 +1764,6 @@ namespace Microsoft.Xna.Framework.Graphics
 				}
 			}
 #endif
-
 			glEffect = MojoShader.MOJOSHADER_glCompileEffect(effect);
 			if (glEffect == IntPtr.Zero)
 			{
