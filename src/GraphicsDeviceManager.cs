@@ -1,6 +1,6 @@
 #region License
 /* FNA - XNA4 Reimplementation for Desktop Platforms
- * Copyright 2009-2017 Ethan Lee and the MonoGame Team
+ * Copyright 2009-2018 Ethan Lee and the MonoGame Team
  *
  * Released under the Microsoft Public License.
  * See LICENSE for details.
@@ -381,6 +381,11 @@ namespace Microsoft.Xna.Framework
 			Rectangle size = (sender as GameWindow).ClientBounds;
 			resizedBackBufferWidth = size.Width;
 			resizedBackBufferHeight = size.Height;
+			if (Environment.GetEnvironmentVariable("FNA_GRAPHICS_ENABLE_HIGHDPI") == "1")
+			{
+				resizedBackBufferWidth *= 2;
+				resizedBackBufferHeight *= 2;
+			}
 			useResizedBackBuffer = true;
 			ApplyChanges();
 		}

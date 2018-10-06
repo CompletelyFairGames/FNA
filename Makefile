@@ -260,6 +260,7 @@ SRC = \
 	src/Graphics/Vertices/VertexPositionNormalTexture.cs \
 	src/Graphics/Vertices/VertexPositionTexture.cs \
 	src/Graphics/Viewport.cs \
+	src/Graphics/X360TexUtil.cs \
 	src/GraphicsDeviceInformation.cs \
 	src/GraphicsDeviceManager.cs \
 	src/IDrawable.cs \
@@ -283,6 +284,13 @@ SRC = \
 	src/Input/Mouse.cs \
 	src/Input/MouseState.cs \
 	src/Input/TextInputEXT.cs \
+	src/Input/Touch/GestureSample.cs \
+	src/Input/Touch/GestureType.cs \
+	src/Input/Touch/TouchCollection.cs \
+	src/Input/Touch/TouchLocation.cs \
+	src/Input/Touch/TouchLocationState.cs \
+	src/Input/Touch/TouchPanel.cs \
+	src/Input/Touch/TouchPanelCapabilities.cs \
 	src/IUpdateable.cs \
 	src/LaunchParameters.cs \
 	src/MathHelper.cs \
@@ -318,7 +326,6 @@ SRC = \
 	src/Vector4.cs \
 	lib/SDL2-CS/src/SDL2.cs \
 	lib/SDL2-CS/src/SDL2_image.cs \
-	lib/SDL2-CS/src/LPUtf8StrMarshaler.cs \
 	lib/OpenAL-CS/src/ALC10.cs \
 	lib/OpenAL-CS/src/ALC11.cs \
 	lib/OpenAL-CS/src/AL10.cs \
@@ -327,7 +334,7 @@ SRC = \
 	lib/OpenAL-CS/src/EFX.cs \
 	lib/MojoShader-CS/MojoShader.cs \
 	lib/Vorbisfile-CS/Vorbisfile.cs \
-	lib/TheoraPlay-CS/TheoraPlay.cs
+	lib/Theorafile/csharp/Theorafile.cs
 
 RESDIR = src/Graphics/Effect/StockEffects/FXB
 RESNAME = Microsoft.Xna.Framework.Graphics.Effect.Resources

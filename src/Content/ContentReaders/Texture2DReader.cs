@@ -1,6 +1,6 @@
 #region License
 /* FNA - XNA4 Reimplementation for Desktop Platforms
- * Copyright 2009-2017 Ethan Lee and the MonoGame Team
+ * Copyright 2009-2018 Ethan Lee and the MonoGame Team
  *
  * Released under the Microsoft Public License.
  * See LICENSE for details.
@@ -13,6 +13,7 @@
 
 #region Using Statements
 using System;
+using System.IO;
 
 using Microsoft.Xna.Framework.Graphics;
 #endregion
@@ -25,7 +26,7 @@ namespace Microsoft.Xna.Framework.Content
 
 		private static string[] supportedExtensions = new string[]
 		{
-			".bmp", ".gif", ".jpg", ".jpeg", ".png", ".tga", ".tif", ".tiff"
+			".bmp", ".gif", ".jpg", ".jpeg", ".png", ".tga", ".tif", ".tiff", ".dds"
 		};
 
 		#endregion
@@ -136,11 +137,66 @@ namespace Microsoft.Xna.Framework.Content
 					continue;
 				}
 
+				// Swap the image data if required.
+				if (reader.platform == 'x')
+				{
+					if (	surfaceFormat == SurfaceFormat.Color ||
+						surfaceFormat == SurfaceFormat.ColorBgraEXT	)
+					{
+						if (levelData == null)
+						{
+							levelData = reader.ReadBytes(levelDataSizeInBytes);
+						}
+						levelData = X360TexUtil.SwapColor(
+							levelData
+						);
+					}
+					else if (surfaceFormat == SurfaceFormat.Dxt1		)
+					{
+						if (levelData == null)
+						{
+							levelData = reader.ReadBytes(levelDataSizeInBytes);
+						}
+						levelData = X360TexUtil.SwapDxt1(
+							levelData,
+							levelWidth,
+							levelHeight
+						);
+					}
+					else if (surfaceFormat == SurfaceFormat.Dxt3		)
+					{
+						if (levelData == null)
+						{
+							levelData = reader.ReadBytes(levelDataSizeInBytes);
+						}
+						levelData = X360TexUtil.SwapDxt3(
+							levelData,
+							levelWidth,
+							levelHeight
+						);
+					}
+					else if (surfaceFormat == SurfaceFormat.Dxt5		)
+					{
+						if (levelData == null)
+						{
+							levelData = reader.ReadBytes(levelDataSizeInBytes);
+						}
+						levelData = X360TexUtil.SwapDxt5(
+							levelData,
+							levelWidth,
+							levelHeight
+						);
+					}
+				}
+
 				// Convert the image data if required
 				if (	surfaceFormat == SurfaceFormat.Dxt1 &&
 					!reader.GraphicsDevice.GLDevice.SupportsDxt1	)
 				{
-						levelData = reader.ReadBytes(levelDataSizeInBytes);
+						if (levelData == null)
+						{
+							levelData = reader.ReadBytes(levelDataSizeInBytes);
+						}
 						levelData = DxtUtil.DecompressDxt1(
 							levelData,
 							levelWidth,
@@ -150,7 +206,10 @@ namespace Microsoft.Xna.Framework.Content
 				else if (	surfaceFormat == SurfaceFormat.Dxt3 &&
 						!reader.GraphicsDevice.GLDevice.SupportsS3tc	)
 				{
-						levelData = reader.ReadBytes(levelDataSizeInBytes);
+						if (levelData == null)
+						{
+							levelData = reader.ReadBytes(levelDataSizeInBytes);
+						}
 						levelData = DxtUtil.DecompressDxt3(
 							levelData,
 							levelWidth,
@@ -160,7 +219,10 @@ namespace Microsoft.Xna.Framework.Content
 				else if (	surfaceFormat == SurfaceFormat.Dxt5 &&
 						!reader.GraphicsDevice.GLDevice.SupportsS3tc	)
 				{
-						levelData = reader.ReadBytes(levelDataSizeInBytes);
+						if (levelData == null)
+						{
+							levelData = reader.ReadBytes(levelDataSizeInBytes);
+						}
 						levelData = DxtUtil.DecompressDxt5(
 							levelData,
 							levelWidth,
@@ -169,7 +231,7 @@ namespace Microsoft.Xna.Framework.Content
 				}
 
 				if (	levelData == null &&
-					reader.BaseStream.GetType() != typeof(System.IO.MemoryStream)	)
+					reader.BaseStream.GetType() != typeof(MemoryStream)	)
 				{
 					/* If the ContentReader is not backed by a
 					 * MemoryStream, we have to read the data in.
@@ -193,13 +255,13 @@ namespace Microsoft.Xna.Framework.Content
 					texture.SetData<byte>(
 						level,
 						null,
-						(((System.IO.MemoryStream) (reader.BaseStream)).GetBuffer()),
-						(int) reader.BaseStream.Position,
+						((MemoryStream) reader.BaseStream).GetBuffer(),
+						(int) reader.BaseStream.Seek(0, SeekOrigin.Current),
 						levelDataSizeInBytes
 					);
 					reader.BaseStream.Seek(
 						levelDataSizeInBytes,
-						System.IO.SeekOrigin.Current
+						SeekOrigin.Current
 					);
 				}
 

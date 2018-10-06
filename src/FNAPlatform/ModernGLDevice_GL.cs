@@ -1,6 +1,6 @@
 #region License
 /* FNA - XNA4 Reimplementation for Desktop Platforms
- * Copyright 2009-2017 Ethan Lee and the MonoGame Team
+ * Copyright 2009-2018 Ethan Lee and the MonoGame Team
  *
  * Released under the Microsoft Public License.
  * See LICENSE for details.
@@ -36,9 +36,9 @@ namespace Microsoft.Xna.Framework.Graphics
 			GL_UNSIGNED_INT =			0x1405,
 			GL_FLOAT =				0x1406,
 			GL_HALF_FLOAT =				0x140B,
-			GL_UNSIGNED_SHORT_4_4_4_4 =		0x8033,
-			GL_UNSIGNED_SHORT_5_5_5_1 =		0x8034,
-			GL_UNSIGNED_INT_10_10_10_2 =		0x8036,
+			GL_UNSIGNED_SHORT_4_4_4_4_REV =		0x8365,
+			GL_UNSIGNED_SHORT_5_5_5_1_REV =		0x8366,
+			GL_UNSIGNED_INT_2_10_10_10_REV =	0x8368,
 			GL_UNSIGNED_SHORT_5_6_5 =		0x8363,
 			GL_UNSIGNED_INT_24_8 =			0x84FA,
 			// Strings
@@ -127,7 +127,6 @@ namespace Microsoft.Xna.Framework.Graphics
 			GL_RGBA =				0x1908,
 			GL_LUMINANCE =				0x1909,
 			GL_LUMINANCE8 =				0x8040,
-			GL_RGB8 =				0x8051,
 			GL_RGBA8 =				0x8058,
 			GL_RGBA4 =				0x8056,
 			GL_RGB5_A1 =				0x8057,
@@ -150,6 +149,7 @@ namespace Microsoft.Xna.Framework.Graphics
 			GL_COMPRESSED_RGBA_S3TC_DXT1_EXT =	0x83F1,
 			GL_COMPRESSED_RGBA_S3TC_DXT3_EXT =	0x83F2,
 			GL_COMPRESSED_RGBA_S3TC_DXT5_EXT =	0x83F3,
+			GL_RGB565 =				0x8D62,
 			// Texture Internal Formats
 			GL_DEPTH_COMPONENT =			0x1902,
 			GL_DEPTH_STENCIL =			0x84F9,
@@ -485,7 +485,7 @@ namespace Microsoft.Xna.Framework.Graphics
 
 		private delegate void CreateSamplers(
 			int n,
-			uint[] samplers
+			IntPtr samplers
 		);
 		private CreateSamplers glCreateSamplers;
 
@@ -637,7 +637,7 @@ namespace Microsoft.Xna.Framework.Graphics
 		private delegate void NamedFramebufferDrawBuffers(
 			uint framebuffer,
 			int n,
-			GLenum[] bufs
+			IntPtr bufs
 		);
 		private NamedFramebufferDrawBuffers glNamedFramebufferDrawBuffers;
 
@@ -806,7 +806,7 @@ namespace Microsoft.Xna.Framework.Graphics
 		/* BEGIN DEBUG OUTPUT FUNCTIONS */
 
 		private delegate void DebugMessageCallback(
-			DebugProc callback,
+			DebugProc debugCallback,
 			IntPtr userParam
 		);
 		private DebugMessageCallback glDebugMessageCallbackARB;
@@ -862,7 +862,7 @@ namespace Microsoft.Xna.Framework.Graphics
 
 		/* BEGIN STRING MARKER FUNCTIONS */
 
-		private delegate void StringMarkerGREMEDY(int length, byte[] chars);
+		private delegate void StringMarkerGREMEDY(int length, IntPtr chars);
 		private StringMarkerGREMEDY glStringMarkerGREMEDY;
 
 		/* END STRING MARKER FUNCTIONS */

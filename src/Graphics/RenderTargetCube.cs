@@ -1,6 +1,6 @@
 #region License
 /* FNA - XNA4 Reimplementation for Desktop Platforms
- * Copyright 2009-2017 Ethan Lee and the MonoGame Team
+ * Copyright 2009-2018 Ethan Lee and the MonoGame Team
  *
  * Released under the Microsoft Public License.
  * See LICENSE for details.
@@ -181,23 +181,23 @@ namespace Microsoft.Xna.Framework.Graphics
 			if (MultiSampleCount > 0)
 			{
 				glColorBuffer = graphicsDevice.GLDevice.GenRenderbuffer(
-					size,
-					size,
+					Size,
+					Size,
 					Format,
 					MultiSampleCount
 				);
 			}
 
 			// If we don't need a depth buffer then we're done.
-			if (preferredDepthFormat == DepthFormat.None)
+			if (DepthStencilFormat == DepthFormat.None)
 			{
 				return;
 			}
 
 			glDepthStencilBuffer = graphicsDevice.GLDevice.GenRenderbuffer(
-				size,
-				size,
-				preferredDepthFormat,
+				Size,
+				Size,
+				DepthStencilFormat,
 				MultiSampleCount
 			);
 		}
@@ -219,6 +219,11 @@ namespace Microsoft.Xna.Framework.Graphics
 		{
 			if (!IsDisposed)
 			{
+				if (glColorBuffer != null)
+				{
+					GraphicsDevice.GLDevice.AddDisposeRenderbuffer(glDepthStencilBuffer);
+				}
+
 				if (glDepthStencilBuffer != null)
 				{
 					GraphicsDevice.GLDevice.AddDisposeRenderbuffer(glDepthStencilBuffer);

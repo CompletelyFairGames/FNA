@@ -336,6 +336,7 @@
     <Compile Include="src\Graphics\Vertices\VertexPositionNormalTexture.cs" />
     <Compile Include="src\Graphics\Vertices\VertexPositionTexture.cs" />
     <Compile Include="src\Graphics\Viewport.cs" />
+    <Compile Include="src\Graphics\X360TexUtil.cs" />
     <Compile Include="src\GraphicsDeviceInformation.cs" />
     <Compile Include="src\GraphicsDeviceManager.cs" />
     <Compile Include="src\IDrawable.cs" />
@@ -359,6 +360,13 @@
     <Compile Include="src\Input\Mouse.cs" />
     <Compile Include="src\Input\MouseState.cs" />
     <Compile Include="src\Input\TextInputEXT.cs" />
+    <Compile Include="src\Input\Touch\GestureSample.cs" />
+    <Compile Include="src\Input\Touch\GestureType.cs" />
+    <Compile Include="src\Input\Touch\TouchCollection.cs" />
+    <Compile Include="src\Input\Touch\TouchLocation.cs" />
+    <Compile Include="src\Input\Touch\TouchLocationState.cs" />
+    <Compile Include="src\Input\Touch\TouchPanel.cs" />
+    <Compile Include="src\Input\Touch\TouchPanelCapabilities.cs" />
     <Compile Include="src\IUpdateable.cs" />
     <Compile Include="src\LaunchParameters.cs" />
     <Compile Include="src\MathHelper.cs" />
@@ -394,7 +402,6 @@
     <Compile Include="src\Vector4.cs" />
     <Compile Include="lib\SDL2-CS\src\SDL2.cs" />
     <Compile Include="lib\SDL2-CS\src\SDL2_image.cs" />
-    <Compile Include="lib\SDL2-CS\src\LPUtf8StrMarshaler.cs" />
     <Compile Include="lib\OpenAL-CS\src\ALC10.cs" />
     <Compile Include="lib\OpenAL-CS\src\ALC11.cs" />
     <Compile Include="lib\OpenAL-CS\src\AL10.cs" />
@@ -403,7 +410,7 @@
     <Compile Include="lib\OpenAL-CS\src\EFX.cs" />
     <Compile Include="lib\MojoShader-CS\MojoShader.cs" />
     <Compile Include="lib\Vorbisfile-CS\Vorbisfile.cs" />
-    <Compile Include="lib\TheoraPlay-CS\TheoraPlay.cs" />
+    <Compile Include="lib\Theorafile\csharp\Theorafile.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="FNA.dll.config">

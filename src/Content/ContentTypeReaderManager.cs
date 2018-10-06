@@ -1,6 +1,6 @@
 #region License
 /* FNA - XNA4 Reimplementation for Desktop Platforms
- * Copyright 2009-2017 Ethan Lee and the MonoGame Team
+ * Copyright 2009-2018 Ethan Lee and the MonoGame Team
  *
  * Released under the Microsoft Public License.
  * See LICENSE for details.
@@ -213,7 +213,10 @@ namespace Microsoft.Xna.Framework.Content
 						}
 					}
 
-					contentReaders.Add(newReaders[i].TargetType, newReaders[i]);
+					if (newReaders[i].TargetType != null)
+					{
+						contentReaders.Add(newReaders[i].TargetType, newReaders[i]);
+					}
 
 					/* I think the next 4 bytes refer to the "Version" of the type reader,
 					 * although it always seems to be zero.

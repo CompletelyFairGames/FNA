@@ -1,6 +1,6 @@
 #region License
 /* FNA - XNA4 Reimplementation for Desktop Platforms
- * Copyright 2009-2017 Ethan Lee and the MonoGame Team
+ * Copyright 2009-2018 Ethan Lee and the MonoGame Team
  *
  * Released under the Microsoft Public License.
  * See LICENSE for details.
@@ -16,7 +16,7 @@ namespace Microsoft.Xna.Framework.Content
 	{
 		#region Public Constructor
 
-		public ExternalReferenceReader() : base(typeof(object))
+		public ExternalReferenceReader() : base(null)
 		{
 		}
 

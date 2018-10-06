@@ -1,6 +1,6 @@
 #region License
 /* FNA - XNA4 Reimplementation for Desktop Platforms
- * Copyright 2009-2017 Ethan Lee and the MonoGame Team
+ * Copyright 2009-2018 Ethan Lee and the MonoGame Team
  *
  * Released under the Microsoft Public License.
  * See LICENSE for details.
@@ -48,6 +48,12 @@ namespace Microsoft.Xna.Framework.Input
 		internal static int INTERNAL_BackBufferHeight = GraphicsDeviceManager.DefaultBackBufferHeight;
 
 		internal static int INTERNAL_MouseWheel = 0;
+
+		#endregion
+
+		#region Public Events
+
+		public static Action<int> ClickedEXT;
 
 		#endregion
 
@@ -108,6 +114,18 @@ namespace Microsoft.Xna.Framework.Input
 			y = (int) ((double) y * INTERNAL_WindowHeight / INTERNAL_BackBufferHeight);
 
 			FNAPlatform.SetMousePosition(WindowHandle, x, y);
+		}
+
+		#endregion
+
+		#region Internal Methods
+
+		internal static void INTERNAL_onClicked(int button)
+		{
+			if (ClickedEXT != null)
+			{
+				ClickedEXT(button);
+			}
 		}
 
 		#endregion

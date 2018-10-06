@@ -1,6 +1,6 @@
 #region License
 /* FNA - XNA4 Reimplementation for Desktop Platforms
- * Copyright 2009-2017 Ethan Lee and the MonoGame Team
+ * Copyright 2009-2018 Ethan Lee and the MonoGame Team
  *
  * Released under the Microsoft Public License.
  * See LICENSE for details.
@@ -46,11 +46,23 @@ namespace Microsoft.Xna.Framework.Graphics
 			GraphicsDevice = graphicsDevice;
 			Size = size;
 			LevelCount = mipMap ? CalculateMipLevels(size) : 1;
-			Format = format;
+
+			// Hey, guess what? You can't render to a compressed texture!
+			if (	this is IRenderTarget &&
+				(	format == SurfaceFormat.Dxt1 ||
+					format == SurfaceFormat.Dxt3 ||
+					format == SurfaceFormat.Dxt5	)	)
+			{
+				Format = SurfaceFormat.Color;
+			}
+			else
+			{
+				Format = format;
+			}
 
 			texture = GraphicsDevice.GLDevice.CreateTextureCube(
-				format,
-				size,
+				Format,
+				Size,
 				LevelCount
 			);
 		}

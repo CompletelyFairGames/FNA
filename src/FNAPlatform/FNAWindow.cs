@@ -1,6 +1,6 @@
 #region License
 /* FNA - XNA4 Reimplementation for Desktop Platforms
- * Copyright 2009-2017 Ethan Lee and the MonoGame Team
+ * Copyright 2009-2018 Ethan Lee and the MonoGame Team
  *
  * Released under the Microsoft Public License.
  * See LICENSE for details.
@@ -54,7 +54,7 @@ namespace Microsoft.Xna.Framework
 		{
 			get
 			{
-				// FNA currently doesn't support orientations.
+				// TODO: return FNAPlatform.GetOrientation(window);
 				return DisplayOrientation.LandscapeLeft;
 			}
 		}

@@ -1,6 +1,6 @@
 #region License
 /* FNA - XNA4 Reimplementation for Desktop Platforms
- * Copyright 2009-2017 Ethan Lee and the MonoGame Team
+ * Copyright 2009-2018 Ethan Lee and the MonoGame Team
  *
  * Released under the Microsoft Public License.
  * See LICENSE for details.
@@ -11,6 +11,7 @@
 using System;
 using System.IO;
 using System.Text;
+using System.Reflection;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
@@ -27,7 +28,7 @@ namespace Microsoft.Xna.Framework
 	{
 		#region Static Constants
 
-		private static readonly string OSVersion = SDL.SDL_GetPlatform();
+		private static string OSVersion;
 
 		private static readonly bool UseScancodes = Environment.GetEnvironmentVariable(
 			"FNA_KEYBOARD_USE_SCANCODES"
@@ -35,10 +36,30 @@ namespace Microsoft.Xna.Framework
 
 		#endregion
 
+		#region Game Objects
+
+		/* This is needed for asynchronous window events */
+		private static List<Game> activeGames = new List<Game>();
+
+		#endregion
+
 		#region Init/Exit Methods
 
 		public static void ProgramInit()
 		{
+			// This is how we can weed out cases where fnalibs is missing
+			try
+			{
+				OSVersion = SDL.SDL_GetPlatform();
+			}
+			catch(Exception e)
+			{
+				FNALoggerEXT.LogError(
+					"SDL2 was not found! Do you have fnalibs?"
+				);
+				throw e;
+			}
+
 			/* SDL2 might complain if an OS that uses SDL_main has not actually
 			 * used SDL_main by the time you initialize SDL2.
 			 * The only platform that is affected is Windows, but we can skip
@@ -48,12 +69,25 @@ namespace Microsoft.Xna.Framework
 			SDL.SDL_SetMainReady();
 
 			// Also, Windows is an idiot. -flibit
-			if (	OSVersion.Equals("Windows") &&
-				System.Diagnostics.Debugger.IsAttached	)
+			if (	OSVersion.Equals("Windows") ||
+				OSVersion.Equals("WinRT")	)
 			{
-				SDL.SDL_SetHint(
-					SDL.SDL_HINT_WINDOWS_DISABLE_THREAD_NAMING,
-					"1"
+				// Visual Studio is an idiot.
+				if (System.Diagnostics.Debugger.IsAttached)
+				{
+					SDL.SDL_SetHint(
+						SDL.SDL_HINT_WINDOWS_DISABLE_THREAD_NAMING,
+						"1"
+					);
+				}
+
+				/* Windows has terrible event pumping and doesn't give us
+				 * WM_PAINT events correctly. So we get to do this!
+				 * -flibit
+				 */
+				SDL.SDL_SetEventFilter(
+					win32OnPaint,
+					IntPtr.Zero
 				);
 			}
 
@@ -120,6 +154,15 @@ namespace Microsoft.Xna.Framework
 			bool forceCoreProfile = Environment.GetEnvironmentVariable(
 				"FNA_OPENGL_FORCE_CORE_PROFILE"
 			) == "1";
+
+			// Some platforms are GLES only
+			forceES3 |= (
+				OSVersion.Equals("WinRT") ||
+				OSVersion.Equals("iOS") ||
+				OSVersion.Equals("tvOS") ||
+				OSVersion.Equals("Android") ||
+				OSVersion.Equals("Emscripten")
+			);
 
 			// Set and initialize the SDL2 window
 			SDL.SDL_WindowFlags initFlags = (
@@ -263,20 +306,6 @@ namespace Microsoft.Xna.Framework
 				clientHeight /= 2;
 			}
 
-			// Fullscreen
-			if (	wantsFullscreen &&
-				(SDL.SDL_GetWindowFlags(window) & (uint) SDL.SDL_WindowFlags.SDL_WINDOW_SHOWN) == 0	)
-			{
-				/* FIXME: SDL2/OSX bug!
-				 * For whatever reason, Spaces windows on OSX
-				 * like to be high-DPI if you set fullscreen
-				 * while the window is hidden. But, if you just
-				 * show the window first, everything is fine.
-				 * -flibit
-				 */
-				SDL.SDL_ShowWindow(window);
-			}
-
 			// When windowed, set the size before moving
 			if (!wantsFullscreen)
 			{
@@ -336,6 +365,20 @@ namespace Microsoft.Xna.Framework
 			// Set fullscreen after we've done all the ugly stuff.
 			if (wantsFullscreen)
 			{
+				if ((SDL.SDL_GetWindowFlags(window) & (uint) SDL.SDL_WindowFlags.SDL_WINDOW_SHOWN) == 0)
+				{
+					/* If we're still hidden, we can't actually go fullscreen yet.
+					 * But, we can at least set the hidden window size to match
+					 * what the window/drawable sizes will eventually be later.
+					 * -flibit
+					 */
+					SDL.SDL_DisplayMode mode;
+					SDL.SDL_GetCurrentDisplayMode(
+						displayIndex,
+						out mode
+					);
+					SDL.SDL_SetWindowSize(window, mode.w, mode.h);
+				}
 				SDL.SDL_SetWindowFullscreen(
 					window,
 					(uint) SDL.SDL_WindowFlags.SDL_WINDOW_FULLSCREEN_DESKTOP
@@ -465,40 +508,53 @@ namespace Microsoft.Xna.Framework
 			else
 			{
 				// But sometimes the title has invalid characters inside.
-
-				/* In addition to the filesystem's invalid charset, we need to
-				 * blacklist the Windows standard set too, no matter what.
-				 * -flibit
-				 */
-				char[] hardCodeBadChars = new char[]
+				string fixPath = INTERNAL_StripBadChars(title) + extension;
+				if (File.Exists(fixPath))
 				{
-					'<',
-					'>',
-					':',
-					'"',
-					'/',
-					'\\',
-					'|',
-					'?',
-					'*'
-				};
-				List<char> badChars = new List<char>();
-				badChars.AddRange(Path.GetInvalidFileNameChars());
-				badChars.AddRange(hardCodeBadChars);
-
-				string stripChars = title;
-				foreach (char c in badChars)
-				{
-					stripChars = stripChars.Replace(c.ToString(), "");
-				}
-				stripChars += extension;
-
-				if (File.Exists(stripChars))
-				{
-					fileIn = stripChars;
+					fileIn = fixPath;
 				}
 			}
 			return fileIn;
+		}
+
+		private static string INTERNAL_StripBadChars(string path)
+		{
+			/* In addition to the filesystem's invalid charset, we need to
+			 * blacklist the Windows standard set too, no matter what.
+			 * -flibit
+			 */
+			char[] hardCodeBadChars = new char[]
+			{
+				'<',
+				'>',
+				':',
+				'"',
+				'/',
+				'\\',
+				'|',
+				'?',
+				'*'
+			};
+			List<char> badChars = new List<char>();
+			badChars.AddRange(Path.GetInvalidFileNameChars());
+			badChars.AddRange(hardCodeBadChars);
+
+			string stripChars = path;
+			foreach (char c in badChars)
+			{
+				stripChars = stripChars.Replace(c.ToString(), "");
+			}
+			return stripChars;
+		}
+
+		public static void SetTextInputRectangle(Rectangle rectangle)
+		{
+			SDL.SDL_Rect rect = new SDL.SDL_Rect();
+			rect.x = rectangle.X;
+			rect.y = rectangle.Y;
+			rect.w = rectangle.Width;
+			rect.h = rectangle.Height;
+			SDL.SDL_SetTextInputRect(ref rect);
 		}
 
 		#endregion
@@ -519,18 +575,8 @@ namespace Microsoft.Xna.Framework
 				game.Window.Handle
 			);
 
-			/* Windows has terrible event pumping and doesn't give us
-			 * WM_PAINT events correctly. So we get to do this!
-			 * -flibit
-			 */
-			if (OSVersion.Equals("Windows") && game.Window.AllowUserResizing)
-			{
-				quickDrawFunc = game.RedrawWindow;
-				SDL.SDL_SetEventFilter(
-					win32OnPaint,
-					Marshal.GetFunctionPointerForDelegate(quickDrawFunc)
-				);
-			}
+			// Store this for internal event filter work
+			activeGames.Add(game);
 
 			// OSX has some fancy fullscreen features, let's use them!
 			bool osxUseSpaces;
@@ -627,6 +673,10 @@ namespace Microsoft.Xna.Framework
 					}
 
 					// Mouse Input
+					else if (evt.type == SDL.SDL_EventType.SDL_MOUSEBUTTONDOWN)
+					{
+						Mouse.INTERNAL_onClicked(evt.button.button - 1);
+					}
 					else if (evt.type == SDL.SDL_EventType.SDL_MOUSEWHEEL)
 					{
 						// 120 units per notch. Because reasons.
@@ -752,9 +802,9 @@ namespace Microsoft.Xna.Framework
 							text = System.Text.Encoding.UTF8.GetString(bytes);
 						}
 
-						if (text.Length > 0)
+						foreach (char c in text)
 						{
-							TextInputEXT.OnTextInput(text[0]);
+							TextInputEXT.OnTextInput(c);
 						}
 					}
 
@@ -777,6 +827,9 @@ namespace Microsoft.Xna.Framework
 				Keyboard.SetKeys(keys);
 				game.Tick();
 			}
+
+			// Okay, we don't care about the events anymore
+			activeGames.Remove(game);
 
 			// We out.
 			game.Exit();
@@ -827,9 +880,12 @@ namespace Microsoft.Xna.Framework
 		{
 			if (interval == PresentInterval.Default || interval == PresentInterval.One)
 			{
-				if (OSVersion.Equals("Mac OS X"))
+				bool disableLateSwapTear = (
+					OSVersion.Equals("Mac OS X") ||
+					Environment.GetEnvironmentVariable("FNA_OPENGL_DISABLE_LATESWAPTEAR") == "1"
+				);
+				if (disableLateSwapTear)
 				{
-					// Apple is a big fat liar about swap_control_tear. Use stock VSync.
 					SDL.SDL_GL_SetSwapInterval(1);
 				}
 				else
@@ -964,6 +1020,34 @@ namespace Microsoft.Xna.Framework
 
 		#region Storage Methods
 
+		public static string GetBaseDirectory()
+		{
+			if (	OSVersion.Equals("Windows") ||
+				OSVersion.Equals("Mac OS X") ||
+				OSVersion.Equals("Linux") ||
+				OSVersion.Equals("FreeBSD") ||
+				OSVersion.Equals("OpenBSD") ||
+				OSVersion.Equals("NetBSD")	)
+			{
+				/* This is mostly here for legacy compatibility.
+				 * For most platforms this should be the same as
+				 * SDL_GetBasePath, but some platforms (Apple's)
+				 * will have a separate Resources folder that is
+				 * the "base" directory for applications.
+				 *
+				 * TODO: Remove this and endure the breakage.
+				 * -flibit
+				 */
+				return AppDomain.CurrentDomain.BaseDirectory;
+			}
+			string result = SDL.SDL_GetBasePath();
+			if (string.IsNullOrEmpty(result))
+			{
+				result = AppDomain.CurrentDomain.BaseDirectory;
+			}
+			return result;
+		}
+
 		public static string GetStorageRoot()
 		{
 			if (OSVersion.Equals("Windows"))
@@ -983,9 +1067,12 @@ namespace Microsoft.Xna.Framework
 				osConfigDir += "/Library/Application Support";
 				return osConfigDir;
 			}
-			if (OSVersion.Equals("Linux"))
+			if (	OSVersion.Equals("Linux") ||
+				OSVersion.Equals("FreeBSD") ||
+				OSVersion.Equals("OpenBSD") ||
+				OSVersion.Equals("NetBSD")	)
 			{
-				// Assuming a non-OSX Unix platform will follow the XDG. Which it should.
+				// Assuming a non-macOS Unix platform will follow the XDG. Which it should.
 				string osConfigDir = Environment.GetEnvironmentVariable("XDG_DATA_HOME");
 				if (String.IsNullOrEmpty(osConfigDir))
 				{
@@ -997,6 +1084,40 @@ namespace Microsoft.Xna.Framework
 					osConfigDir += "/.local/share";
 				}
 				return osConfigDir;
+			}
+			if (	OSVersion.Equals("WinRT") ||
+				OSVersion.Equals("iOS") ||
+				OSVersion.Equals("tvOS") ||
+				OSVersion.Equals("Android") ||
+				OSVersion.Equals("Emscripten")	)
+			{
+				/* StorageContainer and SDL_GetPrefPath kind of
+				 * overlap each other. Container produces 'app'
+				 * but for SDL only 'org' is optional. So we
+				 * deal with this by sending _our_ org to SDL,
+				 * then StorageContainer appends the app name.
+				 * -flibit
+				 */
+				string app = "FNA"; /* Gotta be somethin' */
+				Assembly assembly = Assembly.GetEntryAssembly();
+				if (assembly != null)
+				{
+					AssemblyCompanyAttribute ca = (AssemblyCompanyAttribute) Attribute.GetCustomAttribute(
+						assembly,
+						typeof(AssemblyCompanyAttribute)
+					);
+					if (ca != null && !string.IsNullOrEmpty(ca.Company))
+					{
+						app = INTERNAL_StripBadChars(ca.Company);
+					}
+					else
+					{
+						throw new ArgumentNullException(
+							"Set AssemblyCompany in your AssemblyInfo!"
+						);
+					}
+				}
+				return SDL.SDL_GetPrefPath(null, app);
 			}
 			throw new NotSupportedException("Unhandled SDL2 platform!");
 		}
@@ -1028,18 +1149,17 @@ namespace Microsoft.Xna.Framework
 			int reqHeight = -1,
 			bool zoom = false
 		) {
-			// Load the Stream into an SDL_RWops*
-			byte[] mem = new byte[stream.Length];
-			GCHandle handle = GCHandle.Alloc(mem, GCHandleType.Pinned);
-			stream.Read(mem, 0, mem.Length);
-			IntPtr rwops = SDL.SDL_RWFromMem(mem, mem.Length);
-
 			// Load the SDL_Surface* from RWops, get the image data
-			IntPtr surface = SDL_image.IMG_Load_RW(rwops, 1);
-			handle.Free();
+			FakeRWops reader = new FakeRWops(stream);
+			IntPtr surface = SDL_image.IMG_Load_RW(reader.rwops, 0);
+			reader.Free();
 			if (surface == IntPtr.Zero)
 			{
 				// File not found, supported, etc.
+				FNALoggerEXT.LogError(
+					"TextureDataFromStream: " +
+					SDL.SDL_GetError()
+				);
 				width = 0;
 				height = 0;
 				pixels = null;
@@ -1181,11 +1301,65 @@ namespace Microsoft.Xna.Framework
 			int imgHeight,
 			byte[] data
 		) {
+			IntPtr surface = INTERNAL_getScaledSurface(
+				data,
+				imgWidth,
+				imgHeight,
+				width,
+				height
+			);
+			FakeRWops writer = new FakeRWops(stream);
+			SDL_image.IMG_SavePNG_RW(surface, writer.rwops, 0);
+			writer.Free();
+			SDL.SDL_FreeSurface(surface);
+		}
+
+		public static void SaveJPG(
+			Stream stream,
+			int width,
+			int height,
+			int imgWidth,
+			int imgHeight,
+			byte[] data
+		) {
+			// FIXME: What does XNA pick for this? -flibit
+			const int quality = 100;
+
+			IntPtr surface = INTERNAL_getScaledSurface(
+				data,
+				imgWidth,
+				imgHeight,
+				width,
+				height
+			);
+
+			// FIXME: Hack for Bugzilla #3972
+			IntPtr temp = SDL.SDL_ConvertSurfaceFormat(
+				surface,
+				SDL.SDL_PIXELFORMAT_RGB24,
+				0
+			);
+			SDL.SDL_FreeSurface(surface);
+			surface = temp;
+
+			FakeRWops writer = new FakeRWops(stream);
+			SDL_image.IMG_SaveJPG_RW(surface, writer.rwops, 0, quality);
+			writer.Free();
+			SDL.SDL_FreeSurface(surface);
+		}
+
+		public static IntPtr INTERNAL_getScaledSurface(
+			byte[] data,
+			int srcW,
+			int srcH,
+			int dstW,
+			int dstH
+		) {
 			// Create an SDL_Surface*, write the pixel data
 			IntPtr surface = SDL.SDL_CreateRGBSurface(
 				0,
-				imgWidth,
-				imgHeight,
+				srcW,
+				srcH,
 				32,
 				0x000000FF,
 				0x0000FF00,
@@ -1204,15 +1378,14 @@ namespace Microsoft.Xna.Framework
 				);
 			}
 			SDL.SDL_UnlockSurface(surface);
-			data = null; // We're done with the original pixel data.
 
 			// Blit to a scaled surface of the size we want, if needed.
-			if (width != imgWidth || height != imgHeight)
+			if (srcW != dstW || srcH != dstH)
 			{
 				IntPtr scaledSurface = SDL.SDL_CreateRGBSurface(
 					0,
-					width,
-					height,
+					dstW,
+					dstH,
 					32,
 					0x000000FF,
 					0x0000FF00,
@@ -1233,27 +1406,7 @@ namespace Microsoft.Xna.Framework
 				surface = scaledSurface;
 			}
 
-			// Create an SDL_RWops*, save PNG to RWops
-			const int pngHeaderSize = 41;
-			const int pngFooterSize = 57;
-			byte[] pngOut = new byte[
-				(width * height * 4) +
-				pngHeaderSize +
-				pngFooterSize +
-				256 // FIXME: Arbitrary zlib data padding for low-res images
-			]; // Max image size
-			IntPtr dst = SDL.SDL_RWFromMem(pngOut, pngOut.Length);
-			SDL_image.IMG_SavePNG_RW(surface, dst, 1);
-			SDL.SDL_FreeSurface(surface); // We're done with the surface.
-
-			// Get PNG size, write to Stream
-			int size = (
-				(pngOut[33] << 24) |
-				(pngOut[34] << 16) |
-				(pngOut[35] << 8) |
-				(pngOut[36])
-			) + pngHeaderSize + pngFooterSize;
-			stream.Write(pngOut, 0, size);
+			return surface;
 		}
 
 		private static unsafe IntPtr INTERNAL_convertSurfaceFormat(IntPtr surface)
@@ -1273,6 +1426,139 @@ namespace Microsoft.Xna.Framework
 				}
 			}
 			return result;
+		}
+
+		private class FakeRWops
+		{
+			[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+			private delegate long SizeFunc(IntPtr context);
+
+			[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+			private delegate long SeekFunc(
+				IntPtr context,
+				long offset,
+				int whence
+			);
+
+			[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+			private delegate IntPtr ReadFunc(
+				IntPtr context,
+				IntPtr ptr,
+				IntPtr size,
+				IntPtr maxnum
+			);
+
+			[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+			private delegate IntPtr WriteFunc(
+				IntPtr context,
+				IntPtr ptr,
+				IntPtr size,
+				IntPtr num
+			);
+
+			[StructLayout(LayoutKind.Sequential)]
+			private struct PartialRWops
+			{
+				public IntPtr size;
+				public IntPtr seek;
+				public IntPtr read;
+				public IntPtr write;
+			}
+
+			[DllImport("SDL2.dll", CallingConvention = CallingConvention.Cdecl)]
+			private static extern IntPtr SDL_AllocRW();
+
+			[DllImport("SDL2.dll", CallingConvention = CallingConvention.Cdecl)]
+			private static extern void SDL_FreeRW(IntPtr area);
+
+			public readonly IntPtr rwops;
+			private Stream stream;
+			private byte[] temp;
+
+			private SizeFunc sizeFunc;
+			private SeekFunc seekFunc;
+			private ReadFunc readFunc;
+			private WriteFunc writeFunc;
+
+			public FakeRWops(Stream stream)
+			{
+				this.stream = stream;
+				rwops = SDL_AllocRW();
+				temp = new byte[8192]; // Based on PNG_ZBUF_SIZE default
+
+				sizeFunc = size;
+				seekFunc = seek;
+				readFunc = read;
+				writeFunc = write;
+				unsafe
+				{
+					PartialRWops* p = (PartialRWops*) rwops;
+					p->size = Marshal.GetFunctionPointerForDelegate(sizeFunc);
+					p->seek = Marshal.GetFunctionPointerForDelegate(seekFunc);
+					p->read = Marshal.GetFunctionPointerForDelegate(readFunc);
+					p->write = Marshal.GetFunctionPointerForDelegate(writeFunc);
+				}
+			}
+
+			public void Free()
+			{
+				SDL_FreeRW(rwops);
+				stream = null;
+				temp = null;
+			}
+
+			private byte[] GetTemp(int len)
+			{
+				if (len > temp.Length)
+				{
+					temp = new byte[len];
+				}
+				return temp;
+			}
+
+			private long size(IntPtr context)
+			{
+				return -1;
+			}
+
+			private long seek(IntPtr context, long offset, int whence)
+			{
+				stream.Seek(offset, (SeekOrigin) whence);
+				return stream.Position;
+			}
+
+			private IntPtr read(
+				IntPtr context,
+				IntPtr ptr,
+				IntPtr size,
+				IntPtr maxnum
+			) {
+				int len = size.ToInt32() * maxnum.ToInt32();
+				len = stream.Read(
+					GetTemp(len),
+					0,
+					len
+				);
+				Marshal.Copy(temp, 0, ptr, len);
+				return (IntPtr) len;
+			}
+
+			private IntPtr write(
+				IntPtr context,
+				IntPtr ptr,
+				IntPtr size,
+				IntPtr num
+			) {
+				int len = size.ToInt32() * num.ToInt32();
+				Marshal.Copy(
+					ptr,
+					GetTemp(len),
+					0,
+					len
+				);
+				stream.Write(temp, 0, len);
+				return (IntPtr) len;
+			}
 		}
 
 		#endregion
@@ -1333,10 +1619,18 @@ namespace Microsoft.Xna.Framework
 			}
 		};
 
-		// FIXME: SDL_GameController config input inversion!
-		private static float invertAxis = Environment.GetEnvironmentVariable(
-			"FNA_WORKAROUND_INVERT_YAXIS"
-		) == "1" ? -1.0f : 1.0f;
+		private static readonly GamePadType[] INTERNAL_gamepadType = new GamePadType[]
+		{
+			GamePadType.Unknown,
+			GamePadType.GamePad,
+			GamePadType.Wheel,
+			GamePadType.ArcadeStick,
+			GamePadType.FlightStick,
+			GamePadType.DancePad,
+			GamePadType.Guitar,
+			GamePadType.DrumKit,
+			GamePadType.BigButtonPad
+		};
 
 		public static GamePadCapabilities GetGamePadCapabilities(int index)
 		{
@@ -1367,7 +1661,7 @@ namespace Microsoft.Xna.Framework
 				(float) SDL.SDL_GameControllerGetAxis(
 					device,
 					SDL.SDL_GameControllerAxis.SDL_CONTROLLER_AXIS_LEFTY
-				) / -32767.0f * invertAxis
+				) / -32767.0f
 			);
 			Vector2 stickRight = new Vector2(
 				(float) SDL.SDL_GameControllerGetAxis(
@@ -1377,7 +1671,7 @@ namespace Microsoft.Xna.Framework
 				(float) SDL.SDL_GameControllerGetAxis(
 					device,
 					SDL.SDL_GameControllerAxis.SDL_CONTROLLER_AXIS_RIGHTY
-				) / -32767.0f * invertAxis
+				) / -32767.0f
 			);
 			gc_buttonState |= READ_StickToButtons(
 				stickLeft,
@@ -1652,109 +1946,131 @@ namespace Microsoft.Xna.Framework
 			}
 
 			// An SDL_GameController _should_ always be complete...
-			INTERNAL_capabilities[which] = new GamePadCapabilities()
-			{
-				IsConnected = true,
-				HasAButton = true,
-				HasBButton = true,
-				HasXButton = true,
-				HasYButton = true,
-				HasBackButton = true,
-				HasStartButton = true,
-				HasDPadDownButton = true,
-				HasDPadLeftButton = true,
-				HasDPadRightButton = true,
-				HasDPadUpButton = true,
-				HasLeftShoulderButton = true,
-				HasRightShoulderButton = true,
-				HasLeftStickButton = true,
-				HasRightStickButton = true,
-				HasLeftTrigger = true,
-				HasRightTrigger = true,
-				HasLeftXThumbStick = true,
-				HasLeftYThumbStick = true,
-				HasRightXThumbStick = true,
-				HasRightYThumbStick = true,
-				HasBigButton = true,
-				HasLeftVibrationMotor = INTERNAL_haptics[which] != IntPtr.Zero,
-				HasRightVibrationMotor = INTERNAL_haptics[which] != IntPtr.Zero,
-				HasVoiceSupport = false
-			};
+			GamePadCapabilities caps = new GamePadCapabilities();
+			caps.IsConnected = true;
+			caps.GamePadType = INTERNAL_gamepadType[(int) SDL.SDL_JoystickGetType(thisJoystick)];
+			caps.HasAButton = SDL.SDL_GameControllerGetBindForButton(
+				INTERNAL_devices[which],
+				SDL.SDL_GameControllerButton.SDL_CONTROLLER_BUTTON_A
+			).bindType != SDL.SDL_GameControllerBindType.SDL_CONTROLLER_BINDTYPE_NONE;
+			caps.HasBButton = SDL.SDL_GameControllerGetBindForButton(
+				INTERNAL_devices[which],
+				SDL.SDL_GameControllerButton.SDL_CONTROLLER_BUTTON_B
+			).bindType != SDL.SDL_GameControllerBindType.SDL_CONTROLLER_BINDTYPE_NONE;
+			caps.HasXButton = SDL.SDL_GameControllerGetBindForButton(
+				INTERNAL_devices[which],
+				SDL.SDL_GameControllerButton.SDL_CONTROLLER_BUTTON_X
+			).bindType != SDL.SDL_GameControllerBindType.SDL_CONTROLLER_BINDTYPE_NONE;
+			caps.HasYButton = SDL.SDL_GameControllerGetBindForButton(
+				INTERNAL_devices[which],
+				SDL.SDL_GameControllerButton.SDL_CONTROLLER_BUTTON_Y
+			).bindType != SDL.SDL_GameControllerBindType.SDL_CONTROLLER_BINDTYPE_NONE;
+			caps.HasBackButton = SDL.SDL_GameControllerGetBindForButton(
+				INTERNAL_devices[which],
+				SDL.SDL_GameControllerButton.SDL_CONTROLLER_BUTTON_BACK
+			).bindType != SDL.SDL_GameControllerBindType.SDL_CONTROLLER_BINDTYPE_NONE;
+			caps.HasBigButton = SDL.SDL_GameControllerGetBindForButton(
+				INTERNAL_devices[which],
+				SDL.SDL_GameControllerButton.SDL_CONTROLLER_BUTTON_GUIDE
+			).bindType != SDL.SDL_GameControllerBindType.SDL_CONTROLLER_BINDTYPE_NONE;
+			caps.HasStartButton = SDL.SDL_GameControllerGetBindForButton(
+				INTERNAL_devices[which],
+				SDL.SDL_GameControllerButton.SDL_CONTROLLER_BUTTON_START
+			).bindType != SDL.SDL_GameControllerBindType.SDL_CONTROLLER_BINDTYPE_NONE;
+			caps.HasLeftStickButton = SDL.SDL_GameControllerGetBindForButton(
+				INTERNAL_devices[which],
+				SDL.SDL_GameControllerButton.SDL_CONTROLLER_BUTTON_LEFTSTICK
+			).bindType != SDL.SDL_GameControllerBindType.SDL_CONTROLLER_BINDTYPE_NONE;
+			caps.HasRightStickButton = SDL.SDL_GameControllerGetBindForButton(
+				INTERNAL_devices[which],
+				SDL.SDL_GameControllerButton.SDL_CONTROLLER_BUTTON_RIGHTSTICK
+			).bindType != SDL.SDL_GameControllerBindType.SDL_CONTROLLER_BINDTYPE_NONE;
+			caps.HasLeftShoulderButton = SDL.SDL_GameControllerGetBindForButton(
+				INTERNAL_devices[which],
+				SDL.SDL_GameControllerButton.SDL_CONTROLLER_BUTTON_LEFTSHOULDER
+			).bindType != SDL.SDL_GameControllerBindType.SDL_CONTROLLER_BINDTYPE_NONE;
+			caps.HasRightShoulderButton = SDL.SDL_GameControllerGetBindForButton(
+				INTERNAL_devices[which],
+				SDL.SDL_GameControllerButton.SDL_CONTROLLER_BUTTON_RIGHTSHOULDER
+			).bindType != SDL.SDL_GameControllerBindType.SDL_CONTROLLER_BINDTYPE_NONE;
+			caps.HasDPadUpButton = SDL.SDL_GameControllerGetBindForButton(
+				INTERNAL_devices[which],
+				SDL.SDL_GameControllerButton.SDL_CONTROLLER_BUTTON_DPAD_UP
+			).bindType != SDL.SDL_GameControllerBindType.SDL_CONTROLLER_BINDTYPE_NONE;
+			caps.HasDPadDownButton = SDL.SDL_GameControllerGetBindForButton(
+				INTERNAL_devices[which],
+				SDL.SDL_GameControllerButton.SDL_CONTROLLER_BUTTON_DPAD_DOWN
+			).bindType != SDL.SDL_GameControllerBindType.SDL_CONTROLLER_BINDTYPE_NONE;
+			caps.HasDPadLeftButton = SDL.SDL_GameControllerGetBindForButton(
+				INTERNAL_devices[which],
+				SDL.SDL_GameControllerButton.SDL_CONTROLLER_BUTTON_DPAD_LEFT
+			).bindType != SDL.SDL_GameControllerBindType.SDL_CONTROLLER_BINDTYPE_NONE;
+			caps.HasDPadRightButton = SDL.SDL_GameControllerGetBindForButton(
+				INTERNAL_devices[which],
+				SDL.SDL_GameControllerButton.SDL_CONTROLLER_BUTTON_DPAD_RIGHT
+			).bindType != SDL.SDL_GameControllerBindType.SDL_CONTROLLER_BINDTYPE_NONE;
+			caps.HasLeftXThumbStick = SDL.SDL_GameControllerGetBindForAxis(
+				INTERNAL_devices[which],
+				SDL.SDL_GameControllerAxis.SDL_CONTROLLER_AXIS_LEFTX
+			).bindType != SDL.SDL_GameControllerBindType.SDL_CONTROLLER_BINDTYPE_NONE;
+			caps.HasLeftYThumbStick = SDL.SDL_GameControllerGetBindForAxis(
+				INTERNAL_devices[which],
+				SDL.SDL_GameControllerAxis.SDL_CONTROLLER_AXIS_LEFTY
+			).bindType != SDL.SDL_GameControllerBindType.SDL_CONTROLLER_BINDTYPE_NONE;
+			caps.HasRightXThumbStick = SDL.SDL_GameControllerGetBindForAxis(
+				INTERNAL_devices[which],
+				SDL.SDL_GameControllerAxis.SDL_CONTROLLER_AXIS_RIGHTX
+			).bindType != SDL.SDL_GameControllerBindType.SDL_CONTROLLER_BINDTYPE_NONE;
+			caps.HasRightYThumbStick = SDL.SDL_GameControllerGetBindForAxis(
+				INTERNAL_devices[which],
+				SDL.SDL_GameControllerAxis.SDL_CONTROLLER_AXIS_RIGHTY
+			).bindType != SDL.SDL_GameControllerBindType.SDL_CONTROLLER_BINDTYPE_NONE;
+			caps.HasLeftTrigger = SDL.SDL_GameControllerGetBindForAxis(
+				INTERNAL_devices[which],
+				SDL.SDL_GameControllerAxis.SDL_CONTROLLER_AXIS_TRIGGERLEFT
+			).bindType != SDL.SDL_GameControllerBindType.SDL_CONTROLLER_BINDTYPE_NONE;
+			caps.HasRightTrigger = SDL.SDL_GameControllerGetBindForAxis(
+				INTERNAL_devices[which],
+				SDL.SDL_GameControllerAxis.SDL_CONTROLLER_AXIS_TRIGGERRIGHT
+			).bindType != SDL.SDL_GameControllerBindType.SDL_CONTROLLER_BINDTYPE_NONE;
+			caps.HasLeftVibrationMotor = INTERNAL_haptics[which] != IntPtr.Zero;
+			caps.HasRightVibrationMotor = INTERNAL_haptics[which] != IntPtr.Zero;
+			caps.HasVoiceSupport = false;
+			INTERNAL_capabilities[which] = caps;
 
-			// Store the GUID string for this device
-			StringBuilder result = new StringBuilder();
-			byte[] resChar = new byte[33]; // FIXME: Sort of arbitrary.
-			SDL.SDL_JoystickGetGUIDString(
-				SDL.SDL_JoystickGetGUID(thisJoystick),
-				resChar,
-				resChar.Length
-			);
-			if (OSVersion.Equals("Linux"))
+			/* Store the GUID string for this device
+			 * FIXME: Replace GetGUIDEXT string with 3 short values -flibit
+			 */
+			ushort vendor = SDL.SDL_JoystickGetVendor(thisJoystick);
+			ushort product = SDL.SDL_JoystickGetProduct(thisJoystick);
+			if (vendor == 0x00 && product == 0x00)
 			{
-				result.Append((char) resChar[8]);
-				result.Append((char) resChar[9]);
-				result.Append((char) resChar[10]);
-				result.Append((char) resChar[11]);
-				result.Append((char) resChar[16]);
-				result.Append((char) resChar[17]);
-				result.Append((char) resChar[18]);
-				result.Append((char) resChar[19]);
-			}
-			else if (OSVersion.Equals("Mac OS X"))
-			{
-				result.Append((char) resChar[0]);
-				result.Append((char) resChar[1]);
-				result.Append((char) resChar[2]);
-				result.Append((char) resChar[3]);
-				result.Append((char) resChar[16]);
-				result.Append((char) resChar[17]);
-				result.Append((char) resChar[18]);
-				result.Append((char) resChar[19]);
-			}
-			else if (OSVersion.Equals("Windows"))
-			{
-				bool isXInput = true;
-				foreach (byte b in resChar)
-				{
-					if (((char) b) != '0' && b != 0)
-					{
-						isXInput = false;
-						break;
-					}
-				}
-				if (isXInput)
-				{
-					result.Append("xinput");
-				}
-				else
-				{
-					result.Append((char) resChar[0]);
-					result.Append((char) resChar[1]);
-					result.Append((char) resChar[2]);
-					result.Append((char) resChar[3]);
-					result.Append((char) resChar[4]);
-					result.Append((char) resChar[5]);
-					result.Append((char) resChar[6]);
-					result.Append((char) resChar[7]);
-				}
+				INTERNAL_guids[which] = "xinput";
 			}
 			else
 			{
-				throw new NotSupportedException("Unhandled SDL2 platform!");
+				INTERNAL_guids[which] = string.Format(
+					"{0:x2}{1:x2}{2:x2}{3:x2}",
+					vendor & 0xFF,
+					vendor >> 8,
+					product & 0xFF,
+					product >> 8
+				);
 			}
-			INTERNAL_guids[which] = result.ToString();
 
 			// Initialize light bar
 			if (	OSVersion.Equals("Linux") &&
-				INTERNAL_guids[which].Equals("4c05c405")	)
+				(	INTERNAL_guids[which].Equals("4c05c405") ||
+					INTERNAL_guids[which].Equals("4c05cc09")	)	)
 			{
 				// Get all of the individual PS4 LED instances
 				List<string> ledList = new List<string>();
 				string[] dirs = Directory.GetDirectories("/sys/class/leds/");
 				foreach (string dir in dirs)
 				{
-					if (	dir.Contains("054C:05C4") &&
-						dir.EndsWith("blue")	)
+					if (	dir.EndsWith("blue") &&
+						(	dir.Contains("054C:05C4") ||
+							dir.Contains("054C:09CC")	)	)
 					{
 						ledList.Add(dir.Substring(0, dir.LastIndexOf(':') + 1));
 					}
@@ -1972,6 +2288,8 @@ namespace Microsoft.Xna.Framework
 			{ (int) SDL.SDL_Keycode.SDLK_SLEEP,		Keys.Sleep },
 			{ (int) SDL.SDL_Keycode.SDLK_TAB,		Keys.Tab },
 			{ (int) SDL.SDL_Keycode.SDLK_BACKQUOTE,		Keys.OemTilde },
+			{ (int) SDL.SDL_Keycode.SDLK_VOLUMEUP,		Keys.VolumeUp },
+			{ (int) SDL.SDL_Keycode.SDLK_VOLUMEDOWN,	Keys.VolumeDown },
 			{ '²' /* FIXME: AZERTY SDL2? -flibit */,	Keys.OemTilde },
 			{ 'é' /* FIXME: BEPO SDL2? -flibit */,		Keys.None },
 			{ '|' /* FIXME: Norwegian SDL2? -flibit */,	Keys.OemPipe },
@@ -2101,6 +2419,8 @@ namespace Microsoft.Xna.Framework
 			{ (int) SDL.SDL_Scancode.SDL_SCANCODE_SLEEP,		Keys.Sleep },
 			{ (int) SDL.SDL_Scancode.SDL_SCANCODE_TAB,		Keys.Tab },
 			{ (int) SDL.SDL_Scancode.SDL_SCANCODE_GRAVE,		Keys.OemTilde },
+			{ (int) SDL.SDL_Scancode.SDL_SCANCODE_VOLUMEUP,		Keys.VolumeUp },
+			{ (int) SDL.SDL_Scancode.SDL_SCANCODE_VOLUMEDOWN,	Keys.VolumeDown },
 			{ (int) SDL.SDL_Scancode.SDL_SCANCODE_UNKNOWN,		Keys.None }
 		};
 		private static Dictionary<int, SDL.SDL_Scancode> INTERNAL_xnaMap = new Dictionary<int, SDL.SDL_Scancode>()
@@ -2222,6 +2542,8 @@ namespace Microsoft.Xna.Framework
 			{ (int) Keys.Sleep,		SDL.SDL_Scancode.SDL_SCANCODE_SLEEP },
 			{ (int) Keys.Tab,		SDL.SDL_Scancode.SDL_SCANCODE_TAB },
 			{ (int) Keys.OemTilde,		SDL.SDL_Scancode.SDL_SCANCODE_GRAVE },
+			{ (int) Keys.VolumeUp,		SDL.SDL_Scancode.SDL_SCANCODE_VOLUMEUP },
+			{ (int) Keys.VolumeDown,	SDL.SDL_Scancode.SDL_SCANCODE_VOLUMEDOWN },
 			{ (int) Keys.None,		SDL.SDL_Scancode.SDL_SCANCODE_UNKNOWN }
 		};
 
@@ -2285,21 +2607,21 @@ namespace Microsoft.Xna.Framework
 		#region Private Static Win32 WM_PAINT Interop
 
 		private static SDL.SDL_EventFilter win32OnPaint = Win32OnPaint;
-		private delegate void QuickDrawFunc();
-		private static QuickDrawFunc quickDrawFunc;
-		[DllImport("user32.dll", CallingConvention = CallingConvention.StdCall)]
-		private static extern int InvalidateRect(IntPtr hwnd, IntPtr rect, int erase);
 		private static unsafe int Win32OnPaint(IntPtr func, IntPtr evtPtr)
 		{
 			SDL.SDL_Event* evt = (SDL.SDL_Event*) evtPtr;
 			if (	evt->type == SDL.SDL_EventType.SDL_WINDOWEVENT &&
 				evt->window.windowEvent == SDL.SDL_WindowEventID.SDL_WINDOWEVENT_EXPOSED	)
 			{
-				Marshal.GetDelegateForFunctionPointer(
-					func,
-					typeof(QuickDrawFunc)
-				).DynamicInvoke(null);
-				return 0;
+				foreach (Game game in activeGames)
+				{
+					if (	game.Window != null &&
+						evt->window.windowID == SDL.SDL_GetWindowID(game.Window.Handle)	)
+					{
+						game.RedrawWindow();
+						return 0;
+					}
+				}
 			}
 			return 1;
 		}

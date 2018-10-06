@@ -1,6 +1,6 @@
 #region License
 /* FNA - XNA4 Reimplementation for Desktop Platforms
- * Copyright 2009-2017 Ethan Lee and the MonoGame Team
+ * Copyright 2009-2018 Ethan Lee and the MonoGame Team
  *
  * Released under the Microsoft Public License.
  * See LICENSE for details.
@@ -17,7 +17,6 @@ using System.Reflection;
 using Microsoft.Xna.Framework.Audio;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Media;
-using Microsoft.Xna.Framework.Utilities;
 #endregion
 
 namespace Microsoft.Xna.Framework.Content
@@ -291,7 +290,7 @@ namespace Microsoft.Xna.Framework.Content
 			{
 				// Okay, so we couldn't open it. Maybe it needs a different extension?
 				// FIXME: This only works for files on the disk, what about custom streams? -flibit
-				modifiedAssetName = FileHelpers.NormalizeFilePathSeparators(
+				modifiedAssetName = MonoGame.Utilities.FileHelpers.NormalizeFilePathSeparators(
 					Path.Combine(RootDirectoryFullPath, assetName)
 				);
 				if (typeof(T) == typeof(Texture2D) || typeof(T) == typeof(Texture))
@@ -336,7 +335,7 @@ namespace Microsoft.Xna.Framework.Content
 				targetPlatformIdentifiers.Contains((char) xnbHeader[3]) )
 			{
 				using (BinaryReader xnbReader = new BinaryReader(stream))
-				using (ContentReader reader = GetContentReaderFromXnb(assetName, ref stream, xnbReader, recordDisposableObject))
+				using (ContentReader reader = GetContentReaderFromXnb(assetName, ref stream, xnbReader, (char) xnbHeader[3], recordDisposableObject))
 				{
 					result = reader.ReadAsset<T>();
 					GraphicsResource resource = result as GraphicsResource;
@@ -355,10 +354,24 @@ namespace Microsoft.Xna.Framework.Content
 
 				if (typeof(T) == typeof(Texture2D) || typeof(T) == typeof(Texture))
 				{
-					Texture2D texture = Texture2D.FromStream(
-						graphicsDeviceService.GraphicsDevice,
-						stream
-					);
+					Texture2D texture;
+					if (	xnbHeader[0] == 'D' &&
+						xnbHeader[1] == 'D' &&
+						xnbHeader[2] == 'S' &&
+						xnbHeader[3] == ' '	)
+					{
+						texture = Texture2D.DDSFromStreamEXT(
+							graphicsDeviceService.GraphicsDevice,
+							stream
+						);
+					}
+					else
+					{
+						texture = Texture2D.FromStream(
+							graphicsDeviceService.GraphicsDevice,
+							stream
+						);
+					}
 					texture.Name = assetName;
 					result = texture;
 				}
@@ -381,6 +394,11 @@ namespace Microsoft.Xna.Framework.Content
 				{
 					// FIXME: Not using the stream! -flibit
 					result = new Video(modifiedAssetName, graphicsDeviceService.GraphicsDevice);
+					FNALoggerEXT.LogWarn(
+						"Video " +
+						modifiedAssetName +
+						" does not have an XNB file! Hacking Duration property!"
+					);
 				}
 				else
 				{
@@ -437,7 +455,7 @@ namespace Microsoft.Xna.Framework.Content
 
 		#region Private Methods
 
-		private ContentReader GetContentReaderFromXnb(string originalAssetName, ref Stream stream, BinaryReader xnbReader, Action<IDisposable> recordDisposableObject)
+		private ContentReader GetContentReaderFromXnb(string originalAssetName, ref Stream stream, BinaryReader xnbReader, char platform, Action<IDisposable> recordDisposableObject)
 		{
 			byte version = xnbReader.ReadByte();
 			byte flags = xnbReader.ReadByte();
@@ -525,6 +543,7 @@ namespace Microsoft.Xna.Framework.Content
 					graphicsDeviceService.GraphicsDevice,
 					originalAssetName,
 					version,
+					platform,
 					recordDisposableObject
 				);
 			}
@@ -536,6 +555,7 @@ namespace Microsoft.Xna.Framework.Content
 					graphicsDeviceService.GraphicsDevice,
 					originalAssetName,
 					version,
+					platform,
 					recordDisposableObject
 				);
 			}

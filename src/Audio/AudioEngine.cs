@@ -1,6 +1,6 @@
 #region License
 /* FNA - XNA4 Reimplementation for Desktop Platforms
- * Copyright 2009-2017 Ethan Lee and the MonoGame Team
+ * Copyright 2009-2018 Ethan Lee and the MonoGame Team
  *
  * Released under the Microsoft Public License.
  * See LICENSE for details.
@@ -576,6 +576,14 @@ namespace Microsoft.Xna.Framework.Audio
 		internal SoundEffect INTERNAL_getWaveBankTrack(string name, ushort track)
 		{
 			return INTERNAL_waveBanks[name].INTERNAL_getTrack(track);
+		}
+
+		internal void INTERNAL_dropWaveBankTrack(string name, ushort track)
+		{
+			if (INTERNAL_waveBanks.ContainsKey(name)) // AKA !WaveBank.IsDisposed
+			{
+				INTERNAL_waveBanks[name].INTERNAL_dropTrack(track);
+			}
 		}
 
 		internal string INTERNAL_getVariableName(ushort index)
