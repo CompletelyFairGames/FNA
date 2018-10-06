@@ -1,6 +1,6 @@
 #region License
 /* FNA - XNA4 Reimplementation for Desktop Platforms
- * Copyright 2009-2017 Ethan Lee and the MonoGame Team
+ * Copyright 2009-2018 Ethan Lee and the MonoGame Team
  *
  * Released under the Microsoft Public License.
  * See LICENSE for details.
@@ -8,7 +8,7 @@
 #endregion
 
 #region THREADED_GL Option
-#define THREADED_GL
+// #define THREADED_GL
 /* Ah, so I see you've run into some issues with threaded GL...
  *
  * This class is designed to handle rendering coming from multiple threads, but
@@ -243,7 +243,7 @@ namespace Microsoft.Xna.Framework.Graphics
 			}
 			set
 			{
-				if (value != multisampleMask && supportsMultisampling)
+				if (value != multisampleMask)
 				{
 					if (value == -1)
 					{
@@ -409,7 +409,7 @@ namespace Microsoft.Xna.Framework.Graphics
 		private readonly uint[] currentAttachments;
 		private readonly GLenum[] currentAttachmentTypes;
 		private int currentDrawBuffers;
-		private readonly GLenum[] drawBuffersArray;
+		private readonly IntPtr drawBuffersArray;
 		private uint currentRenderbuffer;
 		private DepthFormat currentDepthStencilFormat;
 		private readonly uint[] attachments;
@@ -520,7 +520,7 @@ namespace Microsoft.Xna.Framework.Graphics
 
 		private bool effectApplied = false;
 
-		private static IntPtr glGetProcAddress(string name, IntPtr d)
+		private static IntPtr glGetProcAddress(IntPtr name, IntPtr d)
 		{
 			return SDL.SDL_GL_GetProcAddress(name);
 		}
@@ -543,6 +543,7 @@ namespace Microsoft.Xna.Framework.Graphics
 
 		private bool useES3;
 		private bool useCoreProfile;
+		private DepthFormat windowDepthFormat;
 		private uint vao;
 
 		#endregion
@@ -550,7 +551,7 @@ namespace Microsoft.Xna.Framework.Graphics
 		#region memcpy Export
 
 		/* This is used a lot for GetData/Read calls... -flibit */
-		[DllImport("msvcrt.dll", CallingConvention = CallingConvention.Cdecl)]
+		[DllImport("msvcrt", CallingConvention = CallingConvention.Cdecl)]
 		private static extern void memcpy(IntPtr dst, IntPtr src, IntPtr len);
 
 		#endregion
@@ -576,13 +577,53 @@ namespace Microsoft.Xna.Framework.Graphics
 			int coreFlag = (int) SDL.SDL_GLprofile.SDL_GL_CONTEXT_PROFILE_CORE;
 			useCoreProfile = (flags & coreFlag) == coreFlag;
 
+			// Check the window's depth/stencil format
+			int depthSize, stencilSize;
+			SDL.SDL_GL_GetAttribute(SDL.SDL_GLattr.SDL_GL_DEPTH_SIZE, out depthSize);
+			SDL.SDL_GL_GetAttribute(SDL.SDL_GLattr.SDL_GL_STENCIL_SIZE, out stencilSize);
+			if (depthSize == 0 && stencilSize == 0)
+			{
+				windowDepthFormat = DepthFormat.None;
+			}
+			else if (depthSize == 16 && stencilSize == 0)
+			{
+				windowDepthFormat = DepthFormat.Depth16;
+			}
+			else if (depthSize == 24 && stencilSize == 0)
+			{
+				windowDepthFormat = DepthFormat.Depth24;
+			}
+			else if (depthSize == 24 && stencilSize == 8)
+			{
+				windowDepthFormat = DepthFormat.Depth24Stencil8;
+			}
+			else
+			{
+				throw new NotSupportedException("Unrecognized window depth/stencil format!");
+			}
+
 			// Init threaded GL crap where applicable
 			InitThreadedGL(
 				presentationParameters.DeviceWindowHandle
 			);
 
+			// Print GL information
+			LoadGLGetString();
+			string renderer = glGetString(GLenum.GL_RENDERER);
+			string version = glGetString(GLenum.GL_VERSION);
+			string vendor = glGetString(GLenum.GL_VENDOR);
+			FNALoggerEXT.LogInfo("IGLDevice: OpenGLDevice");
+			FNALoggerEXT.LogInfo("OpenGL Device: " + renderer);
+			FNALoggerEXT.LogInfo("OpenGL Driver: " + version);
+			FNALoggerEXT.LogInfo("OpenGL Vendor: " + vendor);
+
 			// Initialize entry points
-			LoadGLEntryPoints();
+			LoadGLEntryPoints(string.Format(
+				"Device: {0}\nDriver: {1}\nVendor: {2}",
+				renderer,
+				version,
+				vendor
+			));
 
 			shaderProfile = MojoShader.MOJOSHADER_glBestProfile(
 				GLGetProcAddress,
@@ -600,18 +641,12 @@ namespace Microsoft.Xna.Framework.Graphics
 				IntPtr.Zero
 			);
 			MojoShader.MOJOSHADER_glMakeContextCurrent(shaderContext);
+			FNALoggerEXT.LogInfo("MojoShader Profile: " + shaderProfile);
 
 			// Some users might want pixely upscaling...
 			backbufferScaleMode = Environment.GetEnvironmentVariable(
 				"FNA_OPENGL_BACKBUFFER_SCALE_NEAREST"
 			) == "1" ? GLenum.GL_NEAREST : GLenum.GL_LINEAR;
-
-			// Print GL information
-			FNALoggerEXT.LogInfo("IGLDevice: OpenGLDevice");
-			FNALoggerEXT.LogInfo("OpenGL Device: " + glGetString(GLenum.GL_RENDERER));
-			FNALoggerEXT.LogInfo("OpenGL Driver: " + glGetString(GLenum.GL_VERSION));
-			FNALoggerEXT.LogInfo("OpenGL Vendor: " + glGetString(GLenum.GL_VENDOR));
-			FNALoggerEXT.LogInfo("MojoShader Profile: " + shaderProfile);
 
 			// Load the extension list, initialize extension-dependent components
 			string extensions;
@@ -674,7 +709,8 @@ namespace Microsoft.Xna.Framework.Graphics
 			{
 				Backbuffer = new NullBackbuffer(
 					presentationParameters.BackBufferWidth,
-					presentationParameters.BackBufferHeight
+					presentationParameters.BackBufferHeight,
+					windowDepthFormat
 				);
 			}
 
@@ -724,12 +760,16 @@ namespace Microsoft.Xna.Framework.Graphics
 			attachmentTypes = new GLenum[numAttachments];
 			currentAttachments = new uint[numAttachments];
 			currentAttachmentTypes = new GLenum[numAttachments];
-			drawBuffersArray = new GLenum[numAttachments];
-			for (int i = 0; i < numAttachments; i += 1)
+			drawBuffersArray = Marshal.AllocHGlobal(sizeof(GLenum) * numAttachments);
+			unsafe
 			{
-				currentAttachments[i] = 0;
-				currentAttachmentTypes[i] = GLenum.GL_TEXTURE_2D;
-				drawBuffersArray[i] = GLenum.GL_COLOR_ATTACHMENT0 + i;
+				GLenum* dba = (GLenum*) drawBuffersArray;
+				for (int i = 0; i < numAttachments; i += 1)
+				{
+					currentAttachments[i] = 0;
+					currentAttachmentTypes[i] = GLenum.GL_TEXTURE_2D;
+					dba[i] = GLenum.GL_COLOR_ATTACHMENT0 + i;
+				}
 			}
 			currentDrawBuffers = 0;
 			currentRenderbuffer = 0;
@@ -768,6 +808,7 @@ namespace Microsoft.Xna.Framework.Graphics
 				(Backbuffer as OpenGLBackbuffer).Dispose();
 			}
 			Backbuffer = null;
+			Marshal.FreeHGlobal(drawBuffersArray);
 			MojoShader.MOJOSHADER_glMakeContextCurrent(IntPtr.Zero);
 			MojoShader.MOJOSHADER_glDestroyContext(shaderContext);
 
@@ -820,7 +861,8 @@ namespace Microsoft.Xna.Framework.Graphics
 					(Backbuffer as OpenGLBackbuffer).Dispose();
 					Backbuffer = new NullBackbuffer(
 						presentationParameters.BackBufferWidth,
-						presentationParameters.BackBufferHeight
+						presentationParameters.BackBufferHeight,
+						windowDepthFormat
 					);
 				}
 				else
@@ -1081,8 +1123,9 @@ namespace Microsoft.Xna.Framework.Graphics
 		public void SetStringMarker(string text)
 		{
 #if DEBUG
-			byte[] chars = System.Text.Encoding.ASCII.GetBytes(text);
-			glStringMarkerGREMEDY(chars.Length, chars);
+			IntPtr chars = Marshal.StringToHGlobalAnsi(text);
+			glStringMarkerGREMEDY(text.Length, chars);
+			Marshal.FreeHGlobal(chars);
 #endif
 		}
 
@@ -1325,7 +1368,7 @@ namespace Microsoft.Xna.Framework.Graphics
 			if (blendState.ColorWriteChannels1 != colorWriteEnable1)
 			{
 				colorWriteEnable1 = blendState.ColorWriteChannels1;
-				glColorMaskIndexedEXT(
+				glColorMaski(
 					1,
 					(colorWriteEnable1 & ColorWriteChannels.Red) != 0,
 					(colorWriteEnable1 & ColorWriteChannels.Green) != 0,
@@ -1336,7 +1379,7 @@ namespace Microsoft.Xna.Framework.Graphics
 			if (blendState.ColorWriteChannels2 != colorWriteEnable2)
 			{
 				colorWriteEnable2 = blendState.ColorWriteChannels2;
-				glColorMaskIndexedEXT(
+				glColorMaski(
 					2,
 					(colorWriteEnable2 & ColorWriteChannels.Red) != 0,
 					(colorWriteEnable2 & ColorWriteChannels.Green) != 0,
@@ -1347,7 +1390,7 @@ namespace Microsoft.Xna.Framework.Graphics
 			if (blendState.ColorWriteChannels3 != colorWriteEnable3)
 			{
 				colorWriteEnable3 = blendState.ColorWriteChannels3;
-				glColorMaskIndexedEXT(
+				glColorMaski(
 					3,
 					(colorWriteEnable3 & ColorWriteChannels.Red) != 0,
 					(colorWriteEnable3 & ColorWriteChannels.Green) != 0,
@@ -1356,7 +1399,7 @@ namespace Microsoft.Xna.Framework.Graphics
 				);
 			}
 
-			if (blendState.MultiSampleMask != multisampleMask && supportsMultisampling)
+			if (blendState.MultiSampleMask != multisampleMask)
 			{
 				if (blendState.MultiSampleMask == -1)
 				{
@@ -1564,13 +1607,18 @@ namespace Microsoft.Xna.Framework.Graphics
 				slopeScaleDepthBias = rasterizerState.SlopeScaleDepthBias;
 			}
 
-			/* FIXME: This doesn't actually work on like 99% of setups!
-			 * For whatever reason people decided that they didn't have to obey
-			 * GL_MULTISAMPLE's value when it was disabled.
+			/* If you're reading this, you have a user with broken MSAA!
+			 * Here's the deal: On all modern drivers this should work,
+			 * but there was a period of time where, for some reason,
+			 * IHVs all took a nap and decided that they didn't have to
+			 * respect GL_MULTISAMPLE toggles. A couple sources:
 			 *
-			 * If they could do it for D3D9 I fail to see why they couldn't for
-			 * OpenGL. Idiots.
+			 * https://developer.apple.com/library/content/documentation/GraphicsImaging/Conceptual/OpenGL-MacProgGuide/opengl_fsaa/opengl_fsaa.html
 			 *
+			 * https://www.opengl.org/discussion_boards/showthread.php/172025-glDisable(GL_MULTISAMPLE)-has-no-effect
+			 *
+			 * So yeah. Have em update their driver. If they're on Intel,
+			 * tell them to install Linux. Yes, really.
 			 * -flibit
 			 */
 			if (rasterizerState.MultiSampleAntiAlias != multiSampleEnable)
@@ -1696,9 +1744,8 @@ namespace Microsoft.Xna.Framework.Graphics
 					tex.MaxMipmapLevel
 				);
 			}
-			if (sampler.MipMapLevelOfDetailBias != tex.LODBias)
+			if (sampler.MipMapLevelOfDetailBias != tex.LODBias && !useES3)
 			{
-				System.Diagnostics.Debug.Assert(!useES3);
 				tex.LODBias = sampler.MipMapLevelOfDetailBias;
 				glTexParameterf(
 					tex.Target,
@@ -1823,7 +1870,7 @@ namespace Microsoft.Xna.Framework.Graphics
 			IGLEffect effect,
 			IntPtr technique,
 			uint pass,
-			ref MojoShader.MOJOSHADER_effectStateChanges stateChanges
+			IntPtr stateChanges
 		) {
 			effectApplied = true;
 			IntPtr glEffectData = (effect as OpenGLEffect).GLEffectData;
@@ -1850,7 +1897,7 @@ namespace Microsoft.Xna.Framework.Graphics
 				glEffectData,
 				out whatever,
 				0,
-				ref stateChanges
+				stateChanges
 			);
 			MojoShader.MOJOSHADER_glEffectBeginPass(
 				glEffectData,
@@ -1861,17 +1908,15 @@ namespace Microsoft.Xna.Framework.Graphics
 			currentPass = pass;
 		}
 
-		public void BeginPassRestore(
-			IGLEffect effect,
-			ref MojoShader.MOJOSHADER_effectStateChanges changes
-		) {
+		public void BeginPassRestore(IGLEffect effect, IntPtr stateChanges)
+		{
 			IntPtr glEffectData = (effect as OpenGLEffect).GLEffectData;
 			uint whatever;
 			MojoShader.MOJOSHADER_glEffectBegin(
 				glEffectData,
 				out whatever,
 				1,
-				ref changes
+				stateChanges
 			);
 			MojoShader.MOJOSHADER_glEffectBeginPass(
 				glEffectData,
@@ -2183,9 +2228,7 @@ namespace Microsoft.Xna.Framework.Graphics
 			IGLBuffer buffer,
 			int offsetInBytes,
 			IntPtr data,
-			int startIndex,
-			int elementCount,
-			int elementSizeInBytes,
+			int dataLength,
 			SetDataOptions options
 		) {
 #if !DISABLE_THREADING
@@ -2207,8 +2250,8 @@ namespace Microsoft.Xna.Framework.Graphics
 			glBufferSubData(
 				GLenum.GL_ARRAY_BUFFER,
 				(IntPtr) offsetInBytes,
-				(IntPtr) (elementSizeInBytes * elementCount),
-				data + (startIndex * elementSizeInBytes)
+				(IntPtr) dataLength,
+				data
 			);
 
 #if !DISABLE_THREADING
@@ -2220,9 +2263,7 @@ namespace Microsoft.Xna.Framework.Graphics
 			IGLBuffer buffer,
 			int offsetInBytes,
 			IntPtr data,
-			int startIndex,
-			int elementCount,
-			int elementSizeInBytes,
+			int dataLength,
 			SetDataOptions options
 		) {
 #if !DISABLE_THREADING
@@ -2244,8 +2285,8 @@ namespace Microsoft.Xna.Framework.Graphics
 			glBufferSubData(
 				GLenum.GL_ELEMENT_ARRAY_BUFFER,
 				(IntPtr) offsetInBytes,
-				(IntPtr) (elementSizeInBytes * elementCount),
-				data + (startIndex * elementSizeInBytes)
+				(IntPtr) dataLength,
+				data
 			);
 
 #if !DISABLE_THREADING
@@ -2620,9 +2661,7 @@ namespace Microsoft.Xna.Framework.Graphics
 			int h,
 			int level,
 			IntPtr data,
-			int startIndex,
-			int elementCount,
-			int elementSizeInBytes
+			int dataLength
 		) {
 #if !DISABLE_THREADING
 			ForceToMainThread(() => {
@@ -2646,8 +2685,8 @@ namespace Microsoft.Xna.Framework.Graphics
 					w,
 					h,
 					XNAToGL.TextureInternalFormat[(int) format],
-					elementCount * elementSizeInBytes,
-					data + (startIndex * elementSizeInBytes)
+					dataLength,
+					data
 				);
 			}
 			else
@@ -2671,7 +2710,7 @@ namespace Microsoft.Xna.Framework.Graphics
 					h,
 					glFormat,
 					XNAToGL.TextureDataType[(int) format],
-					data + (startIndex * elementSizeInBytes)
+					data
 				);
 
 				// Keep this state sane -flibit
@@ -2700,9 +2739,7 @@ namespace Microsoft.Xna.Framework.Graphics
 			int front,
 			int back,
 			IntPtr data,
-			int startIndex,
-			int elementCount,
-			int elementSizeInBytes
+			int dataLength
 		) {
 #if !DISABLE_THREADING
 			ForceToMainThread(() => {
@@ -2720,7 +2757,7 @@ namespace Microsoft.Xna.Framework.Graphics
 				back - front,
 				XNAToGL.TextureFormat[(int) format],
 				XNAToGL.TextureDataType[(int) format],
-				data + (startIndex * elementSizeInBytes)
+				data
 			);
 
 #if !DISABLE_THREADING
@@ -2738,9 +2775,7 @@ namespace Microsoft.Xna.Framework.Graphics
 			CubeMapFace cubeMapFace,
 			int level,
 			IntPtr data,
-			int startIndex,
-			int elementCount,
-			int elementSizeInBytes
+			int dataLength
 		) {
 #if !DISABLE_THREADING
 			ForceToMainThread(() => {
@@ -2764,8 +2799,8 @@ namespace Microsoft.Xna.Framework.Graphics
 					width,
 					height,
 					XNAToGL.TextureInternalFormat[(int) format],
-					elementCount * elementSizeInBytes,
-					data + (startIndex * elementSizeInBytes)
+					dataLength,
+					data
 				);
 			}
 			else
@@ -2779,7 +2814,7 @@ namespace Microsoft.Xna.Framework.Graphics
 					height,
 					glFormat,
 					XNAToGL.TextureDataType[(int) format],
-					data + (startIndex * elementSizeInBytes)
+					data
 				);
 			}
 
@@ -3911,7 +3946,7 @@ namespace Microsoft.Xna.Framework.Graphics
 				GLenum.GL_RGB10_A2_EXT,				// SurfaceFormat.Rgba1010102
 				GLenum.GL_RG16,					// SurfaceFormat.Rg32
 				GLenum.GL_RGBA16,				// SurfaceFormat.Rgba64
-				GLenum.GL_LUMINANCE8,				// SurfaceFormat.Alpha8
+				GLenum.GL_LUMINANCE,				// SurfaceFormat.Alpha8
 				GLenum.GL_R32F,					// SurfaceFormat.Single
 				GLenum.GL_RG32F,				// SurfaceFormat.Vector2
 				GLenum.GL_RGBA32F,				// SurfaceFormat.Vector4
@@ -3926,14 +3961,14 @@ namespace Microsoft.Xna.Framework.Graphics
 			{
 				GLenum.GL_UNSIGNED_BYTE,			// SurfaceFormat.Color
 				GLenum.GL_UNSIGNED_SHORT_5_6_5,			// SurfaceFormat.Bgr565
-				GLenum.GL_UNSIGNED_SHORT_5_5_5_1,		// SurfaceFormat.Bgra5551
-				GLenum.GL_UNSIGNED_SHORT_4_4_4_4,		// SurfaceFormat.Bgra4444
+				GLenum.GL_UNSIGNED_SHORT_5_5_5_1_REV,		// SurfaceFormat.Bgra5551
+				GLenum.GL_UNSIGNED_SHORT_4_4_4_4_REV,		// SurfaceFormat.Bgra4444
 				GLenum.GL_ZERO,					// NOPE
 				GLenum.GL_ZERO,					// NOPE
 				GLenum.GL_ZERO,					// NOPE
 				GLenum.GL_BYTE,					// SurfaceFormat.NormalizedByte2
 				GLenum.GL_BYTE,					// SurfaceFormat.NormalizedByte4
-				GLenum.GL_UNSIGNED_INT_10_10_10_2,		// SurfaceFormat.Rgba1010102
+				GLenum.GL_UNSIGNED_INT_2_10_10_10_REV,		// SurfaceFormat.Rgba1010102
 				GLenum.GL_UNSIGNED_SHORT,			// SurfaceFormat.Rg32
 				GLenum.GL_UNSIGNED_SHORT,			// SurfaceFormat.Rgba64
 				GLenum.GL_UNSIGNED_BYTE,			// SurfaceFormat.Alpha8
@@ -4530,11 +4565,8 @@ namespace Microsoft.Xna.Framework.Graphics
 
 			public DepthFormat DepthFormat
 			{
-				get
-				{
-					// Constant, per SDL2_GameWindow
-					return DepthFormat.Depth24Stencil8;
-				}
+				get;
+				private set;
 			}
 
 			public int MultiSampleCount
@@ -4546,10 +4578,11 @@ namespace Microsoft.Xna.Framework.Graphics
 				}
 			}
 
-			public NullBackbuffer(int width, int height)
+			public NullBackbuffer(int width, int height, DepthFormat depthFormat)
 			{
 				Width = width;
 				Height = height;
+				DepthFormat = depthFormat;
 			}
 
 			public void ResetFramebuffer(
