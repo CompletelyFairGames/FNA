@@ -24,8 +24,7 @@
 #endregion
 
 #region DISABLE_THREADING Option
-//#define DISABLE_THREADING
-//#define CRASH_ON_THREADING
+// #define DISABLE_THREADING
 /* Perhaps you read the above option and thought to yourself:
  * "Wow, only an idiot would need threads for their graphics code!"
  *
@@ -1764,6 +1763,7 @@ namespace Microsoft.Xna.Framework.Graphics
 				}
 			}
 #endif
+
 			glEffect = MojoShader.MOJOSHADER_glCompileEffect(effect);
 			if (glEffect == IntPtr.Zero)
 			{
@@ -2266,6 +2266,17 @@ namespace Microsoft.Xna.Framework.Graphics
 			int elementSizeInBytes,
 			int vertexStride
 		) {
+			IntPtr cpy;
+			bool useStagingBuffer = elementSizeInBytes < vertexStride;
+			if (useStagingBuffer)
+			{
+				cpy = Marshal.AllocHGlobal(elementCount * vertexStride);
+			}
+			else
+			{
+				cpy = data + (startIndex * elementSizeInBytes);
+			}
+
 #if !DISABLE_THREADING
 			ForceToMainThread(() => {
 #endif
@@ -2276,12 +2287,25 @@ namespace Microsoft.Xna.Framework.Graphics
 				GLenum.GL_ARRAY_BUFFER,
 				(IntPtr) offsetInBytes,
 				(IntPtr) (elementCount * vertexStride),
-				data + (startIndex * elementSizeInBytes)
+				cpy
 			);
 
 #if !DISABLE_THREADING
 			});
 #endif
+
+			if (useStagingBuffer)
+			{
+				IntPtr src = cpy;
+				IntPtr dst = data + (startIndex * elementSizeInBytes);
+				for (int i = 0; i < elementCount; i += 1)
+				{
+					memcpy(dst, src, (IntPtr) elementSizeInBytes);
+					dst += elementSizeInBytes;
+					src += vertexStride;
+				}
+				Marshal.FreeHGlobal(cpy);
+			}
 		}
 
 		public void GetIndexBufferData(
@@ -3456,11 +3480,25 @@ namespace Microsoft.Xna.Framework.Graphics
 		private void DeleteRenderbuffer(IGLRenderbuffer renderbuffer)
 		{
 			uint handle = (renderbuffer as OpenGLRenderbuffer).Handle;
+
+			// Check color attachments
+			for (int i = 0; i < currentAttachments.Length; i += 1)
+			{
+				if (handle == currentAttachments[i])
+				{
+					// Force an attachment update, this no longer exists!
+					currentAttachments[i] = uint.MaxValue;
+				}
+			}
+
+			// Check depth/stencil attachment
 			if (handle == currentRenderbuffer)
 			{
 				// Force a renderbuffer update, this no longer exists!
 				currentRenderbuffer = uint.MaxValue;
 			}
+
+			// Finally.
 			glDeleteRenderbuffers(1, ref handle);
 		}
 
@@ -4587,17 +4625,11 @@ namespace Microsoft.Xna.Framework.Graphics
 		private void ForceToMainThread(Action action)
 		{
 			// If we're already on the main thread, just call the action.
-		    if (mainThreadId == Thread.CurrentThread.ManagedThreadId)
-		    {
-		        action();
-		        return;
-		    }
-#if CRASH_ON_THREADING
-		    else
-		    {
-		        throw new InvalidOperationException("OpenGL used outside of the main thread.");
-		    }
-#endif
+			if (mainThreadId == Thread.CurrentThread.ManagedThreadId)
+			{
+				action();
+				return;
+			}
 
 #if THREADED_GL
 			lock (BackgroundContext)
